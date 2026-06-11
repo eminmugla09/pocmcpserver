@@ -25,11 +25,26 @@ paths:
                   mcpPath:
                     type: string
                     example: /mcp
+                  privacyPath:
+                    type: string
+                    example: /privacy
+  /privacy:
+    get:
+      operationId: getPrivacyNotice
+      summary: Get privacy notice
+      description: Public privacy notice for the FPL EV ChatGPT POC MCP server.
+      responses:
+        "200":
+          description: Privacy notice HTML page
+          content:
+            text/html:
+              schema:
+                type: string
   /mcp:
     post:
       operationId: postMcpJsonRpc
       summary: Call the MCP Streamable HTTP endpoint
-      description: Send JSON-RPC requests to the MCP server. Use `initialize` first, then `tools/list` or `tools/call` with a mock tool name such as `get_customer_profile`.
+      description: Send JSON-RPC requests to the MCP server. Use `initialize` first, then `tools/list` or `tools/call` with a tool name such as `lookup_account`.
       requestBody:
         required: true
         content:
@@ -66,11 +81,21 @@ paths:
                     name: get_customer_profile
                     arguments:
                       phone: 305-555-0142
+              lookupAccount:
+                summary: Call lookup_account
+                value:
+                  jsonrpc: "2.0"
+                  id: 4
+                  method: tools/call
+                  params:
+                    name: lookup_account
+                    arguments:
+                      phone: 305-555-0142
               matchPropertyToCustomer:
                 summary: Call match_property_to_customer
                 value:
                   jsonrpc: "2.0"
-                  id: 4
+                  id: 5
                   method: tools/call
                   params:
                     name: match_property_to_customer
@@ -80,7 +105,7 @@ paths:
                 summary: Call check_ev_eligibility
                 value:
                   jsonrpc: "2.0"
-                  id: 5
+                  id: 6
                   method: tools/call
                   params:
                     name: check_ev_eligibility

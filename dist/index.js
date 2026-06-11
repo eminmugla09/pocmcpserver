@@ -236,7 +236,7 @@ const startHttpServer = () => {
             return;
         }
         writeJson(response, 404, { error: "Not found", mcpPath: "/mcp", healthPath: "/health" });
-    }).listen(port, () => {
+    }).listen(port, "0.0.0.0", () => {
         console.log(`FPL MCP HTTP server listening on port ${port}; endpoint: /mcp`);
     });
 };

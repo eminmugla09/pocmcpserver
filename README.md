@@ -18,9 +18,42 @@ npm run build
 npm start
 ```
 
+By default, `npm start` runs the MCP server over stdio for local MCP clients. To run the same server as a Railway-style HTTP service, set `PORT` or `MCP_TRANSPORT=http`:
+
+```bash
+PORT=3000 npm start
+```
+
+HTTP endpoints:
+
+- `POST /mcp`: stateless Streamable HTTP MCP endpoint
+- `GET /health`: health check returning `{ "status": "ok", "mcpPath": "/mcp" }`
+- `GET /privacy`: public privacy notice for ChatGPT connector/app setup
+
+## Deploy on Railway
+
+Railway sets `PORT` automatically, so the app will start in HTTP mode and expose the MCP endpoint at:
+
+```text
+https://<your-railway-domain>/mcp
+```
+
+Use this privacy policy URL for ChatGPT connector/app setup:
+
+```text
+https://<your-railway-domain>/privacy
+```
+
+Use these Railway settings:
+
+- Build command: `npm install && npm run build`
+- Start command: `npm start`
+- Health check path: `/health`
+
 ## MCP server tools
 
 - `get_customer_profile`: Returns Emin's linked accounts, premises and registered Tesla Model Y.
+- `lookup_account`: Resolves residential account records by account number, customer number, phone, email, premise number or address.
 - `get_account_summary`: Returns account status, standing, rate class, smart meter, enrolled programs and account flags.
 - `get_premise_details`: Returns property type, service status, meter, garage and 240V details.
 - `get_billing_inquiry`: Returns bill amount, due date, kWh, charge breakdown and EV off-peak savings.
