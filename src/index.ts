@@ -73,6 +73,12 @@ const createFplMcpServer = () => {
   const server = new McpServer({
     name: "fpl-agent-mcp",
     version: "0.2.0"
+  }, {
+    capabilities: {
+      tools: {
+        listChanged: true
+      }
+    }
   });
 
 server.registerTool(
