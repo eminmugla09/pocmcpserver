@@ -417,82 +417,36 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
     sessionIdGenerator: undefined
   });
 
+  // Intercept response to remove taskSupport forbidden
+  const originalWrite = response.write.bind(response);
+  const originalEnd = response.end.bind(response);
+  let responseData = "";
+
+  response.write = function(chunk: any, encoding?: any) {
+    if (typeof chunk === "string") {
+      responseData += chunk;
+    }
+    return originalWrite(chunk, encoding);
+  };
+
+  response.end = function(chunk?: any, encoding?: any) {
+    if (chunk) {
+      if (typeof chunk === "string") {
+        responseData += chunk;
+      }
+    }
+
+    // Remove taskSupport forbidden from tools/list response
+    if (responseData.includes("taskSupport")) {
+      responseData = responseData.replace(/"execution":\{[^}]*\}/g, "");
+    }
+
+    originalEnd(responseData, encoding);
+  };
+
   try {
     const body = await readRequestBody(request);
     await server.connect(transport);
-
-    // Handle initialize
-    if (body?.method === "initialize") {
-      const initResponse = {
-        jsonrpc: "2.0",
-        id: body.id,
-        result: {
-          protocolVersion: "2025-03-26",
-          capabilities: {
-            tools: { listChanged: true }
-          },
-          serverInfo: {
-            name: "fpl-agent-mcp",
-            version: "0.2.0"
-          }
-        }
-      };
-      setCorsHeaders(response);
-      response.writeHead(200, { "Content-Type": "text/event-stream" });
-      response.write(`event: message\ndata: ${JSON.stringify(initResponse)}\n\n`);
-      response.end();
-      await transport.close();
-      await server.close();
-      return;
-    }
-
-    // Handle tools/list - remove taskSupport forbidden
-    if (body?.method === "tools/list") {
-      const toolsResponse = await server.request(
-        { method: "tools/list", params: {} },
-        { _meta: {} }
-      );
-      const cleanTools = {
-        jsonrpc: "2.0",
-        id: body.id,
-        result: {
-          tools: toolsResponse.result.tools.map((tool: any) => ({
-            name: tool.name,
-            description: tool.description,
-            inputSchema: tool.inputSchema
-          }))
-        }
-      };
-      setCorsHeaders(response);
-      response.writeHead(200, { "Content-Type": "text/event-stream" });
-      response.write(`event: message\ndata: ${JSON.stringify(cleanTools)}\n\n`);
-      response.end();
-      await transport.close();
-      await server.close();
-      return;
-    }
-
-    // Handle tools/call
-    if (body?.method === "tools/call") {
-      const result = await server.request(
-        { method: "tools/call", params: body.params },
-        { _meta: {} }
-      );
-      const callResponse = {
-        jsonrpc: "2.0",
-        id: body.id,
-        result: result.result
-      };
-      setCorsHeaders(response);
-      response.writeHead(200, { "Content-Type": "text/event-stream" });
-      response.write(`event: message\ndata: ${JSON.stringify(callResponse)}\n\n`);
-      response.end();
-      await transport.close();
-      await server.close();
-      return;
-    }
-
-    // Default to transport handler for other methods
     await transport.handleRequest(request, response, body);
   } catch (error) {
     console.error("Error handling MCP request", error);
