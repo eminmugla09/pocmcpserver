@@ -24,6 +24,21 @@ const findPremiseByAddress = (address) => {
         return fullAddress.includes(normalizedAddress) || normalizedAddress.includes(premiseAddress?.line1?.toLowerCase() ?? "");
     });
 };
+const findAccounts = (input) => {
+    const premise = input.address ? findPremiseByAddress(input.address) : undefined;
+    const premiseNumber = input.premise_number ?? premise?.premiseNumber;
+    const matchesPhone = !input.phone || input.phone === mockData.customer.mobilePhone;
+    const matchesEmail = !input.email || input.email.toLowerCase() === String(mockData.customer.email).toLowerCase();
+    const matchesCustomerNumber = !input.customer_number || input.customer_number === mockData.customer.customerNumber;
+    if (!matchesPhone || !matchesEmail || !matchesCustomerNumber) {
+        return [];
+    }
+    return Object.values(mockData.accounts).filter((account) => {
+        const matchesAccountNumber = !input.account_number || account.accountNumber === input.account_number;
+        const matchesPremiseNumber = !premiseNumber || account.premiseNumber === premiseNumber;
+        return matchesAccountNumber && matchesPremiseNumber;
+    });
+};
 const createFplMcpServer = () => {
     const server = new McpServer({
         name: "fpl-agent-mcp",
@@ -44,6 +59,27 @@ const createFplMcpServer = () => {
             return jsonContent({ found: false, message: "No matching synthetic customer profile found." });
         }
         return jsonContent(mockData.customer);
+    });
+    server.registerTool("lookup_account", {
+        description: "Resolve residential account records by account, customer, phone, email, premise, or address.",
+        inputSchema: {
+            account_number: z.string().optional(),
+            customer_number: z.string().optional(),
+            phone: z.string().optional(),
+            email: z.string().optional(),
+            premise_number: z.string().optional(),
+            address: z.string().optional()
+        }
+    }, async (input) => {
+        const accounts = findAccounts(input);
+        const premiseNumbers = new Set(accounts.map((account) => account.premiseNumber));
+        const premises = [...premiseNumbers].map((premiseNumber) => mockData.premises[premiseNumber]).filter(Boolean);
+        return jsonContent({
+            found: accounts.length > 0,
+            customerNumber: mockData.customer.customerNumber,
+            accounts,
+            premises
+        });
     });
     server.registerTool("get_account_summary", {
         description: "Return account status, standing, rate class, smart meter status, enrolled programs and flags.",
@@ -178,6 +214,44 @@ const writeJson = (response, statusCode, payload) => {
     response.writeHead(statusCode, { "Content-Type": "application/json" });
     response.end(JSON.stringify(payload));
 };
+const writeHtml = (response, statusCode, html) => {
+    setCorsHeaders(response);
+    response.writeHead(statusCode, { "Content-Type": "text/html; charset=utf-8" });
+    response.end(html);
+};
+const privacyPageHtml = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>FPL EV ChatGPT POC Privacy Notice</title>
+    <style>
+      body { font-family: Arial, sans-serif; line-height: 1.5; max-width: 760px; margin: 40px auto; padding: 0 20px; color: #1f2933; }
+      h1, h2 { color: #102a43; }
+      code { background: #f3f4f6; padding: 2px 4px; border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <h1>FPL EV ChatGPT POC Privacy Notice</h1>
+    <p>Last updated: 2026-06-11</p>
+    <p>This service is a proof-of-concept MCP server for a ChatGPT demo. It uses synthetic mock data only. It is not an official FPL production service and does not connect to real FPL, SAP, MuleSoft, billing, permitting, notification, city-registration, or customer systems.</p>
+
+    <h2>Data Used</h2>
+    <p>The MCP tools return demo records from local mock data bundled with the application. The demo data is invented and should not be treated as real customer information.</p>
+
+    <h2>Data Collection</h2>
+    <p>The server processes requests sent to <code>/mcp</code> so it can return mock tool responses. It does not intentionally collect, sell, or share personal information. Hosting and network providers may create standard operational logs such as request timestamps, paths, status codes, and IP metadata.</p>
+
+    <h2>Data Storage</h2>
+    <p>The application does not persist conversation content, user prompts, or tool-call inputs to an application database. Mock action tools return canned responses and do not create real service orders or enrollments.</p>
+
+    <h2>Use Limits</h2>
+    <p>Do not enter real customer data, account credentials, payment details, Social Security numbers, passwords, API keys, or other sensitive information into this demo.</p>
+
+    <h2>Contact</h2>
+    <p>For demo questions, contact the owner of the deployed proof-of-concept repository.</p>
+  </body>
+</html>`;
 const handleMcpRequest = async (request, response) => {
     setCorsHeaders(response);
     if (request.method === "OPTIONS") {
@@ -228,14 +302,18 @@ const startHttpServer = () => {
     createServer(async (request, response) => {
         const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
         if (url.pathname === "/health") {
-            writeJson(response, 200, { status: "ok", mcpPath: "/mcp" });
+            writeJson(response, 200, { status: "ok", mcpPath: "/mcp", privacyPath: "/privacy" });
+            return;
+        }
+        if (url.pathname === "/privacy") {
+            writeHtml(response, 200, privacyPageHtml);
             return;
         }
         if (url.pathname === "/mcp") {
             await handleMcpRequest(request, response);
             return;
         }
-        writeJson(response, 404, { error: "Not found", mcpPath: "/mcp", healthPath: "/health" });
+        writeJson(response, 404, { error: "Not found", mcpPath: "/mcp", healthPath: "/health", privacyPath: "/privacy" });
     }).listen(port, "0.0.0.0", () => {
         console.log(`FPL MCP HTTP server listening on port ${port}; endpoint: /mcp`);
     });
