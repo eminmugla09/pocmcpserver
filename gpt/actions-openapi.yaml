@@ -29,13 +29,7 @@ paths:
     post:
       operationId: postMcpJsonRpc
       summary: Call the MCP Streamable HTTP endpoint
-      description: |
-        Sends JSON-RPC requests to the MCP server. Use `initialize` first, then `tools/list` or `tools/call`.
-
-        Available mock tool names include `get_customer_profile`, `get_account_summary`, `get_premise_details`,
-        `get_billing_inquiry`, `get_payment_history`, `get_usage_history`, `get_ev_enrollment`,
-        `check_ev_eligibility`, `match_property_to_customer`, `get_service_connection_quote`,
-        `start_service_connection`, `enroll_ev_charging`, and `set_move_intent`.
+      description: Send JSON-RPC requests to the MCP server. Use `initialize` first, then `tools/list` or `tools/call` with a mock tool name such as `get_customer_profile`.
       requestBody:
         required: true
         content:
