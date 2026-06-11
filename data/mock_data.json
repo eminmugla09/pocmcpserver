@@ -1,0 +1,223 @@
+{
+  "_README": "100% SYNTHETIC DATA. No real FPL customer information. All names, addresses, account/premise/business-partner numbers, phone numbers, emails, EV details and dollar amounts are invented for the ChatGPT POC demo. Safe to use on a personal machine / personal ChatGPT account. Field names mirror the real SAP /ev, /tmd, and billusage xAPIs so the mock MCP responses look authentic.",
+
+  "customer": {
+    "customerNumber": "1009988776",
+    "businessPartnerId": "1009988776",
+    "firstName": "Emin",
+    "lastName": "Mugla",
+    "fullName": "Emin Mugla",
+    "email": "emin.demo@example.com",
+    "mobilePhone": "305-555-0142",
+    "preferredContactMethod": "Mobile",
+    "preferredLanguage": "EN",
+    "customerSince": "2018-03-09",
+    "accountStandingFlag": "GOOD",
+    "linkedAccounts": ["5210099001"],
+    "linkedPremises": ["60412233", "60587744"],
+    "registeredVehicles": [
+      {
+        "vehicleId": "EVREG-7781",
+        "make": "Tesla",
+        "model": "Model Y",
+        "year": 2024,
+        "connectorType": "J1772 (with adapter)",
+        "registeredDate": "2024-08-02",
+        "linkedPremise": "60412233"
+      }
+    ]
+  },
+
+  "accounts": {
+    "5210099001": {
+      "accountNumber": "5210099001",
+      "contractAccountId": "5210099001",
+      "customerNumber": "1009988776",
+      "premiseNumber": "60412233",
+      "accountType": "Residential",
+      "rateClass": "RS-1 Residential Service",
+      "status": "Active",
+      "standing": "Good standing - no past due balance",
+      "pastDueFlag": false,
+      "paymentExtensionFlag": false,
+      "taxExemptFlag": false,
+      "pendingConnectDisconnectFlag": false,
+      "smartMeterFlag": true,
+      "budgetBillingFlag": false,
+      "enrolledPrograms": ["FPL EVolution Home", "Paperless Billing", "Energy Dashboard"],
+      "serviceAddress": {
+        "line1": "1450 Brickell Bay Dr, Apt 1402",
+        "city": "Miami",
+        "state": "FL",
+        "zip": "33131"
+      }
+    }
+  },
+
+  "premises": {
+    "60412233": {
+      "premiseNumber": "60412233",
+      "address": {
+        "line1": "1450 Brickell Bay Dr, Apt 1402",
+        "city": "Miami",
+        "state": "FL",
+        "zip": "33131"
+      },
+      "propertyType": "Single-family / townhouse with attached garage",
+      "serviceStatus": "Active - Emin Mugla",
+      "activeAccountNumber": "5210099001",
+      "smartMeterFlag": true,
+      "meterInstallationNumber": "4100556677",
+      "evolutionHomeEligible": true,
+      "evolutionHomeEnrolled": true
+    },
+    "60587744": {
+      "premiseNumber": "60587744",
+      "address": {
+        "line1": "320 Anchorage Dr",
+        "city": "North Palm Beach",
+        "state": "FL",
+        "zip": "33408"
+      },
+      "propertyType": "Single-family home with attached 2-car garage",
+      "serviceStatus": "Inactive - prior occupant moved out 2026-05-28; awaiting new owner connect",
+      "activeAccountNumber": null,
+      "smartMeterFlag": true,
+      "meterInstallationNumber": "4100889900",
+      "evolutionHomeEligible": true,
+      "evolutionHomeEnrolled": false,
+      "newOwnerOnRecord": "Emin Mugla (per county property/home registration feed, recorded 2026-06-05)",
+      "strongWifiAtChargingLocation": true,
+      "existing240vCircuitInGarage": false
+    }
+  },
+
+  "ev_enrollments": {
+    "5210099001": {
+      "accountNumber": "5210099001",
+      "premiseNumber": "60412233",
+      "programName": "FPL EVolution Home",
+      "isFullInstallation": true,
+      "isEquipmentOnly": false,
+      "chargerId": "FPLEVH-0099231",
+      "chargerModel": "FPL EVolution Home Level 2 (9.6 kW, J1772, Wi-Fi)",
+      "enrollmentDate": "2024-08-15",
+      "interviewDate": "2024-08-20",
+      "installDate": "2024-09-26",
+      "monthlyCharge": 36.00,
+      "ratePlan": "EVolution Home off-peak time-of-use",
+      "status": "Active"
+    }
+  },
+
+  "ev_eligibility": {
+    "60587744": {
+      "premiseNumber": "60587744",
+      "eligible": true,
+      "checks": {
+        "ownsSingleFamilyOrTownhouseWithAttachedGarage": true,
+        "strongWifiAtChargingLocation": true,
+        "activeResidentialAccountInGoodStanding": "PENDING - power connection not yet established at this premise",
+        "noPastDueOrPaymentExtension": true,
+        "notBusinessOrTaxExempt": true,
+        "smartMeterPresent": true,
+        "noPendingConnectDisconnectOrder": true,
+        "has240vCircuitInGarage": false
+      },
+      "recommendedInstallType": "Full installation ($36/mo) - garage has no existing 240V circuit",
+      "alternateInstallType": "Equipment-only ($27/mo) - only if a 240V circuit is added first",
+      "notes": "Eligibility for EVolution Home requires an active residential account in good standing. Establish power service at 320 Anchorage Dr first, then EV enrollment can proceed."
+    }
+  },
+
+  "billing": {
+    "5210099001": {
+      "accountNumber": "5210099001",
+      "currentBill": {
+        "invoiceId": "INV-20260528-5521",
+        "billDate": "2026-05-28",
+        "dueDate": "2026-06-18",
+        "amountDue": 168.74,
+        "billingPeriod": "2026-04-27 to 2026-05-27",
+        "kwhUsed": 1142,
+        "averageDailyKwh": 38.1,
+        "averageDailyCostUsd": 5.62,
+        "comparedToLastMonthPct": 6.4,
+        "comparedToLastYearPct": -3.1,
+        "charges": [
+          {"description": "Base charge", "amountUsd": 9.10},
+          {"description": "Non-fuel energy (1142 kWh)", "amountUsd": 92.55},
+          {"description": "Fuel charge", "amountUsd": 33.18},
+          {"description": "EVolution Home monthly charge", "amountUsd": 36.00},
+          {"description": "Taxes & fees", "amountUsd": -2.09}
+        ],
+        "evChargingKwh": 286,
+        "evOffPeakKwh": 261,
+        "evOnPeakKwh": 25,
+        "estimatedEvOffPeakSavingsUsd": 21.40
+      },
+      "paymentStatus": "Current - no balance past due",
+      "autopayEnrolled": true,
+      "nextScheduledPaymentDate": "2026-06-18",
+      "nextScheduledPaymentAmountUsd": 168.74
+    }
+  },
+
+  "payment_history": {
+    "5210099001": [
+      {"paymentDate": "2026-05-18", "amountUsd": 159.02, "method": "AutoPay - Bank (ACH)", "confirmation": "PMT-558821", "status": "Posted"},
+      {"paymentDate": "2026-04-18", "amountUsd": 174.66, "method": "AutoPay - Bank (ACH)", "confirmation": "PMT-551209", "status": "Posted"},
+      {"paymentDate": "2026-03-18", "amountUsd": 188.31, "method": "AutoPay - Bank (ACH)", "confirmation": "PMT-543774", "status": "Posted"},
+      {"paymentDate": "2026-02-18", "amountUsd": 201.45, "method": "AutoPay - Bank (ACH)", "confirmation": "PMT-536910", "status": "Posted"}
+    ]
+  },
+
+  "usage_history": {
+    "5210099001": [
+      {"month": "2026-05", "kwh": 1142, "costUsd": 168.74, "evChargingKwh": 286},
+      {"month": "2026-04", "kwh": 1188, "costUsd": 174.66, "evChargingKwh": 301},
+      {"month": "2026-03", "kwh": 1264, "costUsd": 188.31, "evChargingKwh": 318},
+      {"month": "2026-02", "kwh": 1351, "costUsd": 201.45, "evChargingKwh": 295}
+    ]
+  },
+
+  "service_connection_quote": {
+    "60587744": {
+      "premiseNumber": "60587744",
+      "address": "320 Anchorage Dr, North Palm Beach, FL 33408",
+      "serviceType": "New residential power connection (move-in)",
+      "depositRequired": false,
+      "depositReason": "Waived - existing customer in good standing since 2018",
+      "earliestConnectDate": "2026-06-13",
+      "standardConnectDate": "2026-06-16",
+      "connectionFeeUsd": 0.00,
+      "rateClass": "RS-1 Residential Service"
+    }
+  },
+
+  "demo_write_responses": {
+    "_README": "Canned success payloads the mock MCP should return for the write/action tools so the agent can 'do something' on camera. No real orders are created.",
+    "start_service_connection": {
+      "status": "SUBMITTED",
+      "serviceOrderId": "SO-NPB-7741200",
+      "premiseNumber": "60587744",
+      "scheduledConnectDate": "2026-06-13",
+      "message": "New residential power connection scheduled for 320 Anchorage Dr, North Palm Beach. No deposit required (existing customer in good standing). Confirmation also sent to emin.demo@example.com."
+    },
+    "enroll_ev_charging": {
+      "status": "ENROLLMENT_STARTED",
+      "enrollmentId": "EVH-NPB-330145",
+      "premiseNumber": "60587744",
+      "installType": "Full installation",
+      "monthlyCharge": 36.00,
+      "nextStep": "Electrical assessment - we'll text a link to upload garage photos",
+      "estimatedCompletion": "2-3 months from electrical assessment",
+      "message": "Started FPL EVolution Home enrollment for 320 Anchorage Dr. Because there's no existing 240V circuit in the garage, full installation is recommended at $36/month."
+    },
+    "set_move_intent": {
+      "status": "RECORDED",
+      "intent": "KEEP_BOTH",
+      "message": "Noted that you intend to keep both the Miami and North Palm Beach properties. No move-out order created for the Miami account (5210099001)."
+    }
+  }
+}

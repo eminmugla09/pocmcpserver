@@ -1,0 +1,293 @@
+openapi: 3.1.0
+info:
+  title: FPL EV ChatGPT POC Actions
+  version: 0.2.0
+  description: Optional HTTPS action facade for the data-backed mock MCP tools.
+servers:
+  - url: https://api.example.com/fpl-agent
+paths:
+  /customer/profile:
+    post:
+      operationId: getCustomerProfile
+      summary: Get synthetic customer profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                customer_number:
+                  type: string
+                phone:
+                  type: string
+                email:
+                  type: string
+      responses:
+        "200":
+          description: Customer profile
+          content:
+            application/json:
+              schema:
+                type: object
+  /accounts/summary:
+    post:
+      operationId: getAccountSummary
+      summary: Get account summary
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [account_number]
+              properties:
+                account_number:
+                  type: string
+      responses:
+        "200":
+          description: Account summary
+          content:
+            application/json:
+              schema:
+                type: object
+  /premises/details:
+    post:
+      operationId: getPremiseDetails
+      summary: Get premise details
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                premise_number:
+                  type: string
+                address:
+                  type: string
+      responses:
+        "200":
+          description: Premise details
+          content:
+            application/json:
+              schema:
+                type: object
+  /billing/inquiry:
+    post:
+      operationId: getBillingInquiry
+      summary: Get current bill details
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [account_number]
+              properties:
+                account_number:
+                  type: string
+      responses:
+        "200":
+          description: Billing inquiry
+          content:
+            application/json:
+              schema:
+                type: object
+  /payments/history:
+    post:
+      operationId: getPaymentHistory
+      summary: Get payment history and AutoPay details
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [account_number]
+              properties:
+                account_number:
+                  type: string
+      responses:
+        "200":
+          description: Payment history
+          content:
+            application/json:
+              schema:
+                type: object
+  /usage/history:
+    post:
+      operationId: getUsageHistory
+      summary: Get monthly usage history
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [account_number]
+              properties:
+                account_number:
+                  type: string
+      responses:
+        "200":
+          description: Usage history
+          content:
+            application/json:
+              schema:
+                type: object
+  /ev/enrollment:
+    post:
+      operationId: getEvEnrollment
+      summary: Get EV enrollment details
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [account_number]
+              properties:
+                account_number:
+                  type: string
+      responses:
+        "200":
+          description: EV enrollment
+          content:
+            application/json:
+              schema:
+                type: object
+  /ev/eligibility:
+    post:
+      operationId: checkEvEligibility
+      summary: Check EV home charging eligibility
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [premise_number]
+              properties:
+                premise_number:
+                  type: string
+      responses:
+        "200":
+          description: EV eligibility
+          content:
+            application/json:
+              schema:
+                type: object
+  /properties/match:
+    post:
+      operationId: matchPropertyToCustomer
+      summary: Match a property registration event to a customer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [address]
+              properties:
+                address:
+                  type: string
+      responses:
+        "200":
+          description: Property match
+          content:
+            application/json:
+              schema:
+                type: object
+  /service/connection-quote:
+    post:
+      operationId: getServiceConnectionQuote
+      summary: Get service connection quote
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [premise_number]
+              properties:
+                premise_number:
+                  type: string
+      responses:
+        "200":
+          description: Service connection quote
+          content:
+            application/json:
+              schema:
+                type: object
+  /service/start:
+    post:
+      operationId: startServiceConnection
+      summary: Submit mock power connection request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [premise_number]
+              properties:
+                premise_number:
+                  type: string
+                account_number:
+                  type: string
+                requested_connect_date:
+                  type: string
+      responses:
+        "200":
+          description: Mock service connection response
+          content:
+            application/json:
+              schema:
+                type: object
+  /ev/enroll:
+    post:
+      operationId: enrollEvCharging
+      summary: Submit mock EV charging enrollment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [premise_number, install_type]
+              properties:
+                premise_number:
+                  type: string
+                install_type:
+                  type: string
+                  enum: [full, equipment_only]
+      responses:
+        "200":
+          description: Mock EV enrollment response
+          content:
+            application/json:
+              schema:
+                type: object
+  /move/intent:
+    post:
+      operationId: setMoveIntent
+      summary: Record mock move intent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [intent]
+              properties:
+                intent:
+                  type: string
+                  enum: [keep_both, move_out_miami]
+      responses:
+        "200":
+          description: Move intent response
+          content:
+            application/json:
+              schema:
+                type: object
