@@ -1,16 +1,16 @@
-# EV ChatGPT POC — Mock MCP Tool Specs
+# EV ChatGPT MCP Tool Specs
 
 **Stack-agnostic.** Implement these as MCP tools in whatever runtime is fastest for Emin
 (Python FastMCP, Node `@modelcontextprotocol/sdk`, etc.). Every tool just reads the matching
 record from `mock_data.json` and returns it — **no network calls, no real APIs**. Tool names,
 arguments, and response shapes deliberately mirror the real FPL MuleSoft xAPIs (`/ev`, `/tmd`,
-billusage) so the demo is a faithful preview of the production design.
+billusage) so the interface maps cleanly to the production design.
 
 > All data is synthetic. See the `_README` keys in `mock_data.json`.
 
 ---
 
-## Demo customer (hardcode these as defaults so the agent has something to "find")
+## Customer Defaults
 
 | Thing | Value |
 |-------|-------|
@@ -73,26 +73,26 @@ Simulates the "home registration feed for North Palm Beach City" event.
 
 ---
 
-## Action / write tools (mock — return canned success from `mock_data.demo_write_responses`)
+## Action / write tools (return canned success from `mock_data.action_responses`)
 
 ### 10. `start_service_connection`
 - **Args:** `premise_number`, `account_number` (optional), `requested_connect_date` (optional)
-- **Returns:** `demo_write_responses.start_service_connection` (deposit waived, scheduled connect date, service order id).
+- **Returns:** `action_responses.start_service_connection` (deposit waived, scheduled connect date, service order id).
 - **Maps to:** `move_in` / SAP `/movein` + `/serviceorder`.
 
 ### 11. `enroll_ev_charging`
 - **Args:** `premise_number`, `install_type` (`full` | `equipment_only`)
-- **Returns:** `demo_write_responses.enroll_ev_charging` (enrollment id, next step = electrical assessment / garage photos).
+- **Returns:** `action_responses.enroll_ev_charging` (enrollment id, next step = electrical assessment / garage photos).
 - **Maps to:** SAP `/ev Enroll` (write).
 
 ### 12. `set_move_intent`
 - **Args:** `keep_both` | `move_out_miami`
-- **Returns:** `demo_write_responses.set_move_intent` — records keep-both, no move-out order.
+- **Returns:** `action_responses.set_move_intent` — records keep-both, no move-out order.
 - **Maps to:** SAP `/nsmo` (move-out) — here just records intent.
 
 ---
 
-## Minimal set for the demo
+## Minimal set
 
 If Emin wants the smallest possible build, these 9 cover all three scenarios:
 `get_customer_profile`, `get_account_summary`, `get_premise_details`, `get_billing_inquiry`,
@@ -101,7 +101,7 @@ If Emin wants the smallest possible build, these 9 cover all three scenarios:
 
 ## Making ChatGPT proactive (important)
 
-The demo's whole point is **proactive tool use**. Put guidance like this in the MCP server /
+The key behavior is **proactive tool use**. Put guidance like this in the MCP server /
 custom GPT system instructions:
 
 > You are the FPL customer assistant for Emin Mugla. At the start of a session, and whenever the

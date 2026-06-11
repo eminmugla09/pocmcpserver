@@ -15,7 +15,7 @@ type MockData = {
   payment_history: Record<string, Array<Record<string, unknown>>>;
   usage_history: Record<string, Array<Record<string, unknown>>>;
   service_connection_quote: Record<string, Record<string, unknown>>;
-  demo_write_responses: Record<string, Record<string, unknown> | string>;
+  action_responses: Record<string, Record<string, unknown> | string>;
 };
 
 const mockData = mockDataJson as MockData;
@@ -78,7 +78,7 @@ const createFplMcpServer = () => {
 server.registerTool(
   "get_customer_profile",
   {
-    description: "Identify the synthetic demo customer and return linked accounts, premises and registered EVs.",
+    description: "Identify the customer and return linked accounts, premises and registered EVs.",
     inputSchema: {
       customer_number: z.string().optional(),
       phone: z.string().optional(),
@@ -91,7 +91,7 @@ server.registerTool(
     const matchesEmail = !email || email.toLowerCase() === String(mockData.customer.email).toLowerCase();
 
     if (!matchesCustomerNumber || !matchesPhone || !matchesEmail) {
-      return jsonContent({ found: false, message: "No matching synthetic customer profile found." });
+      return jsonContent({ found: false, message: "No matching customer profile found." });
     }
 
     return jsonContent(mockData.customer);
@@ -116,8 +116,15 @@ server.registerTool(
     const premiseNumbers = new Set(accounts.map((account) => account.premiseNumber as string));
     const premises = [...premiseNumbers].map((premiseNumber) => mockData.premises[premiseNumber]).filter(Boolean);
 
+    if (accounts.length === 0) {
+      return jsonContent({
+        found: false,
+        message: "No matching account found. Ask the customer for one lookup value: phone number, email address, account number, customer number, premise number, or service address. For voice, ask one question at a time."
+      });
+    }
+
     return jsonContent({
-      found: accounts.length > 0,
+      found: true,
       customerNumber: mockData.customer.customerNumber,
       accounts,
       premises
@@ -221,7 +228,7 @@ server.registerTool(
 server.registerTool(
   "match_property_to_customer",
   {
-    description: "Simulate matching a North Palm Beach property-registration event to the synthetic customer.",
+    description: "Match a North Palm Beach property-registration event to the customer.",
     inputSchema: {
       address: z.string()
     }
@@ -257,7 +264,7 @@ server.registerTool(
 server.registerTool(
   "start_service_connection",
   {
-    description: "Mock action that submits a new residential power connection request.",
+    description: "Submit a new residential power connection request.",
     inputSchema: {
       premise_number: z.string(),
       account_number: z.string().optional(),
@@ -266,7 +273,7 @@ server.registerTool(
   },
   async (input) =>
     jsonContent({
-      ...(mockData.demo_write_responses.start_service_connection as Record<string, unknown>),
+      ...(mockData.action_responses.start_service_connection as Record<string, unknown>),
       request: input
     })
 );
@@ -274,7 +281,7 @@ server.registerTool(
 server.registerTool(
   "enroll_ev_charging",
   {
-    description: "Mock action that starts FPL EVolution Home enrollment for a premise.",
+    description: "Start FPL EVolution Home enrollment for a premise.",
     inputSchema: {
       premise_number: z.string(),
       install_type: z.enum(["full", "equipment_only"])
@@ -282,7 +289,7 @@ server.registerTool(
   },
   async (input) =>
     jsonContent({
-      ...(mockData.demo_write_responses.enroll_ev_charging as Record<string, unknown>),
+      ...(mockData.action_responses.enroll_ev_charging as Record<string, unknown>),
       request: input
     })
 );
@@ -290,14 +297,14 @@ server.registerTool(
 server.registerTool(
   "set_move_intent",
   {
-    description: "Mock action that records whether the customer is keeping both homes or moving out of Miami.",
+    description: "Record whether the customer is keeping both homes or moving out of Miami.",
     inputSchema: {
       intent: z.enum(["keep_both", "move_out_miami"])
     }
   },
   async (input) =>
     jsonContent({
-      ...(mockData.demo_write_responses.set_move_intent as Record<string, unknown>),
+      ...(mockData.action_responses.set_move_intent as Record<string, unknown>),
       request: input
     })
 );
@@ -343,7 +350,7 @@ const privacyPageHtml = `<!doctype html>
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>FPL EV ChatGPT POC Privacy Notice</title>
+    <title>FPL EV ChatGPT Privacy Notice</title>
     <style>
       body { font-family: Arial, sans-serif; line-height: 1.5; max-width: 760px; margin: 40px auto; padding: 0 20px; color: #1f2933; }
       h1, h2 { color: #102a43; }
@@ -351,24 +358,24 @@ const privacyPageHtml = `<!doctype html>
     </style>
   </head>
   <body>
-    <h1>FPL EV ChatGPT POC Privacy Notice</h1>
+    <h1>FPL EV ChatGPT Privacy Notice</h1>
     <p>Last updated: 2026-06-11</p>
-    <p>This service is a proof-of-concept MCP server for a ChatGPT demo. It uses synthetic mock data only. It is not an official FPL production service and does not connect to real FPL, SAP, MuleSoft, billing, permitting, notification, city-registration, or customer systems.</p>
+    <p>This service provides MCP tools for an FPL EV assistant using sample data only. It is not an official FPL production service and does not connect to real FPL, SAP, MuleSoft, billing, permitting, notification, city-registration, or customer systems.</p>
 
     <h2>Data Used</h2>
-    <p>The MCP tools return demo records from local mock data bundled with the application. The demo data is invented and should not be treated as real customer information.</p>
+    <p>The MCP tools return sample records bundled with the application. The sample data is invented and should not be treated as real customer information.</p>
 
     <h2>Data Collection</h2>
-    <p>The server processes requests sent to <code>/mcp</code> so it can return mock tool responses. It does not intentionally collect, sell, or share personal information. Hosting and network providers may create standard operational logs such as request timestamps, paths, status codes, and IP metadata.</p>
+    <p>The server processes requests sent to <code>/mcp</code> so it can return tool responses. It does not intentionally collect, sell, or share personal information. Hosting and network providers may create standard operational logs such as request timestamps, paths, status codes, and IP metadata.</p>
 
     <h2>Data Storage</h2>
-    <p>The application does not persist conversation content, user prompts, or tool-call inputs to an application database. Mock action tools return canned responses and do not create real service orders or enrollments.</p>
+    <p>The application does not persist conversation content, user prompts, or tool-call inputs to an application database. Action tools return canned responses and do not create real service orders or enrollments.</p>
 
     <h2>Use Limits</h2>
-    <p>Do not enter real customer data, account credentials, payment details, Social Security numbers, passwords, API keys, or other sensitive information into this demo.</p>
+    <p>Do not enter real customer data, account credentials, payment details, Social Security numbers, passwords, API keys, or other sensitive information into this service.</p>
 
     <h2>Contact</h2>
-    <p>For demo questions, contact the owner of the deployed proof-of-concept repository.</p>
+    <p>For questions, contact the owner of the deployed repository.</p>
   </body>
 </html>`;
 

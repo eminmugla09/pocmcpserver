@@ -1,5 +1,5 @@
 {
-  "_README": "100% SYNTHETIC DATA. No real FPL customer information. All names, addresses, account/premise/business-partner numbers, phone numbers, emails, EV details and dollar amounts are invented for the ChatGPT POC demo. Safe to use on a personal machine / personal ChatGPT account. Field names mirror the real SAP /ev, /tmd, and billusage xAPIs so the mock MCP responses look authentic.",
+  "_README": "100% SAMPLE DATA. No real FPL customer information. All names, addresses, account/premise/business-partner numbers, phone numbers, emails, EV details and dollar amounts are invented. Safe to use on a personal machine / personal ChatGPT account. Field names mirror the real SAP /ev, /tmd, and billusage xAPIs so the MCP responses look authentic.",
 
   "customer": {
     "customerNumber": "1009988776",
@@ -7,7 +7,7 @@
     "firstName": "Emin",
     "lastName": "Mugla",
     "fullName": "Emin Mugla",
-    "email": "emin.demo@example.com",
+    "email": "woarzus@gmail.com",
     "mobilePhone": "305-555-0142",
     "preferredContactMethod": "Mobile",
     "preferredLanguage": "EN",
@@ -195,14 +195,14 @@
     }
   },
 
-  "demo_write_responses": {
-    "_README": "Canned success payloads the mock MCP should return for the write/action tools so the agent can 'do something' on camera. No real orders are created.",
+  "action_responses": {
+    "_README": "Canned success payloads the MCP should return for the write/action tools. No real orders are created.",
     "start_service_connection": {
       "status": "SUBMITTED",
       "serviceOrderId": "SO-NPB-7741200",
       "premiseNumber": "60587744",
       "scheduledConnectDate": "2026-06-13",
-      "message": "New residential power connection scheduled for 320 Anchorage Dr, North Palm Beach. No deposit required (existing customer in good standing). Confirmation also sent to emin.demo@example.com."
+      "message": "New residential power connection scheduled for 320 Anchorage Dr, North Palm Beach. No deposit required (existing customer in good standing). Confirmation also sent to woarzus@gmail.com."
     },
     "enroll_ev_charging": {
       "status": "ENROLLMENT_STARTED",

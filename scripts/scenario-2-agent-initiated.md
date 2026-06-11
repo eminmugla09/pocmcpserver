@@ -1,6 +1,6 @@
 # Scenario 2: Agent Reaches Out Proactively
 
-The agent is plugged into a synthetic North Palm Beach home-registration feed. It sees a new-owner record, recognizes Emin as an existing customer with a registered EV and an FPL EVolution Home charger, and calls him first.
+The agent is plugged into a North Palm Beach home-registration feed. It sees a new-owner record, recognizes Emin as an existing customer with a registered EV and an FPL EVolution Home charger, and calls him first.
 
 Trigger trace:
 

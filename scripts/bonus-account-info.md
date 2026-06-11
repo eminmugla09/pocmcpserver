@@ -9,6 +9,7 @@ Emin: What is my current FPL bill and when is it due?
 Tool trace:
 
 - `get_account_summary(account_number="5210099001")`
+- `lookup_account(phone="305-555-0142")`
 - `get_billing_inquiry(account_number="5210099001")`
 
 FPL Agent: Your current bill is $168.74, due June 18. It covers 1,142 kWh for the April 27 to May 27 period, about $5.62 a day, and roughly 3% lower than the same month last year. You are on AutoPay, so it will draft automatically on the 18th. Want the charge breakdown or your payment history?

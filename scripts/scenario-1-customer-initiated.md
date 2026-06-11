@@ -18,7 +18,7 @@ FPL Agent: One thing to set up first: EVolution Home requires an active resident
 
 Emin: Okay. And the charger itself, what is involved?
 
-FPL Agent: It is an all-in-one program with no upfront cost in this demo. There are two options: Get a charger, which is full installation at $36/month, or EV Ready, which is equipment-only at $27/month if you already have a 240-volt circuit in the garage.
+FPL Agent: It is an all-in-one program with no upfront cost. There are two options: Get a charger, which is full installation at $36/month, or EV Ready, which is equipment-only at $27/month if you already have a 240-volt circuit in the garage.
 
 Tool trace:
 

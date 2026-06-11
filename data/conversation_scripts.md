@@ -1,8 +1,8 @@
-# EV ChatGPT POC — Demo Scripts
+# EV ChatGPT Conversation Scripts
 
-Three scripts for the leadership demo. **[bracketed italics]** = the tool the agent calls behind
+Three scripts for the leadership walkthrough. **[bracketed italics]** = the tool the agent calls behind
 the scenes (show this on screen / in the trace to prove governed API access). Language is adapted
-from fpl.com's FPL EVolution® Home program. All data comes from `mock_data.json` (synthetic).
+from fpl.com's FPL EVolution® Home program. All data comes from the MCP tools.
 
 Customer: **Emin Mugla** — Miami condo with an EVolution Home charger; just bought a single-family
 home at **320 Anchorage Dr, North Palm Beach, FL 33408**.
@@ -122,6 +122,7 @@ email. Welcome to the neighborhood, Emin.
 **Emin:** What's my current FPL bill and when's it due?
 
 **FPL Agent:**
+> *[`lookup_account(phone="305-555-0142")`]*
 > *[`get_account_summary(account_number="5210099001")`]*
 > *[`get_billing_inquiry(account_number="5210099001")`]*
 
@@ -152,4 +153,4 @@ Want me to walk through it?
 |----------|---------------------------------------------|
 | 1 | `match_property_to_customer`, `check_ev_eligibility`, `get_premise_details`, `enroll_ev_charging` |
 | 2 | **proactive** `match_property_to_customer` (event-triggered), `get_customer_profile`, `start_service_connection`, `enroll_ev_charging`, `set_move_intent` |
-| Bonus | `get_account_summary`, `get_billing_inquiry`, `get_payment_history` |
+| Bonus | `lookup_account`, `get_account_summary`, `get_billing_inquiry`, `get_payment_history`, `get_usage_history` |

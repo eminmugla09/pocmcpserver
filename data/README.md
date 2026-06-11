@@ -1,35 +1,34 @@
-# EV ChatGPT POC — mock-data demo pack
+# EV ChatGPT MCP Data Pack
 
-A self-contained pack so **Emin can stand up a mock MCP server on a personal machine + personal
-ChatGPT account** and run the leadership demo **without touching the corporate network or any real
-customer data**.
+A self-contained pack so **Emin can stand up an MCP server on a personal machine + personal
+ChatGPT account** without touching the corporate network or any real customer data.
 
 This is the deliberate shortcut around the bottleneck of wiring the ChatGPT app connector to the
-real `fpl-assistant` MCP. Instead of calling live MuleSoft xAPIs, the MCP tools return **synthetic
-data** shaped exactly like the real APIs — so the demo previews the production design faithfully.
+real `fpl-assistant` MCP. Instead of calling live MuleSoft xAPIs, the MCP tools return **sample
+data** shaped exactly like the real APIs.
 
 ## Why this is safe
 - **No real customer data leaves the network.** Everything in `mock_data.json` is invented.
 - **No real APIs are called.** Tools read the local JSON and return canned responses.
-- Field names mirror the real SAP `/ev`, `/tmd`, and billusage xAPIs, so the demo looks authentic
+- Field names mirror the real SAP `/ev`, `/tmd`, and billusage xAPIs, so the responses look authentic
   and maps 1:1 to the eventual production wiring.
 
 ## Files
 | File | What it is |
 |------|------------|
-| `mock_data.json` | All synthetic data for the demo customer **Emin Mugla** |
-| `tool_specs.md` | Stack-agnostic MCP tool definitions (args + which mock record each returns) |
-| `conversation_scripts.md` | The three demo scripts: Scenario 1, Scenario 2, Bonus |
+| `mock_data.json` | All sample data for the customer **Emin Mugla** |
+| `tool_specs.md` | Stack-agnostic MCP tool definitions (args + which sample record each returns) |
+| `conversation_scripts.md` | The three conversation scripts: Scenario 1, Scenario 2, Bonus |
 
 ## How Emin uses it (any stack)
 1. Pick a runtime — Python `FastMCP` (matches the parent `fpl-assistant` server) or the Node MCP SDK.
 2. Implement the ~9 tools in `tool_specs.md`. Each tool is a few lines: look up a key in
-   `mock_data.json` and return it. Action tools return `demo_write_responses.*`.
+  `mock_data.json` and return it. Action tools return `action_responses.*`.
 3. Expose it to ChatGPT as a custom connector / local MCP.
 4. Paste the proactivity instructions (bottom of `tool_specs.md`) into the GPT's system prompt.
 5. Run the scripts in `conversation_scripts.md`.
 
-## The demo customer
+## The customer
 **Emin Mugla** — Miami condo (`5210099001` / premise `60412233`) with an active FPL EVolution Home
 charger and a registered Tesla Model Y; just bought a single-family home at **320 Anchorage Dr,
 North Palm Beach** (premise `60587744`, no service yet).
@@ -40,7 +39,7 @@ North Palm Beach** (premise `60587744`, no service yet).
 
 ### 1. How do we make Scenario 1 less generic?
 You're right — "Can I get EV home charging and what do I need?" is answerable by public ChatGPT
-today from fpl.com marketing copy. The demo only impresses if the answer is **grounded in Emin's
+today from fpl.com marketing copy. The assistant is strongest when the answer is **grounded in Emin's
 data and the agent can act**. Differentiate it with these moves (all built into the mock tools):
 
 - **Answer about *his* specific property, not the program.** `check_ev_eligibility(60587744)` returns
@@ -75,14 +74,14 @@ The production target: *FPL agents, chatbots, and AI assistants need governed, r
 customer data behind MuleSoft xAPIs — one central, secure, observable place — instead of every
 consumer re-inventing auth and integration.*
 
-This POC previews exactly that:
+This setup supports exactly that:
 - The tool names/shapes are the real xAPI contracts (the parent `fpl-assistant` server already
   implements many against live MuleSoft).
-- It demonstrates the headline behavior leadership wants: **ChatGPT proactively invoking governed
+- It shows the headline behavior leadership wants: **ChatGPT proactively invoking governed
   tools** — reacting to a property-registration event, checking eligibility, and taking action —
   rather than reciting public info.
 - Swapping mock tools for the real MuleSoft-backed `fpl-assistant` tools is the only delta between
-  this demo and production; the conversation and UX stay identical.
+  this setup and production; the conversation and UX stay identical.
 
-> **Demo data is 100% synthetic.** Replace the mock layer with the governed `fpl-assistant` MCP +
+> **Sample data is 100% invented.** Replace the sample layer with the governed `fpl-assistant` MCP +
 > MuleSoft OAuth2 path (see `../AGENTS.md`) for the real integration.

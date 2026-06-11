@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
-  title: FPL EV ChatGPT POC MCP
+  title: FPL EV ChatGPT MCP
   version: 0.3.0
-  description: Railway-hosted Streamable HTTP MCP endpoint for the data-backed FPL EV mock tools.
+  description: Railway-hosted Streamable HTTP MCP endpoint for the data-backed FPL EV tools.
 servers:
   - url: https://pocserver.up.railway.app
 paths:
@@ -32,7 +32,7 @@ paths:
     get:
       operationId: getPrivacyNotice
       summary: Get privacy notice
-      description: Public privacy notice for the FPL EV ChatGPT POC MCP server.
+      description: Public privacy notice for the FPL EV ChatGPT MCP server.
       responses:
         "200":
           description: Privacy notice HTML page
