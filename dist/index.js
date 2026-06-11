@@ -43,6 +43,12 @@ const createFplMcpServer = () => {
     const server = new McpServer({
         name: "fpl-agent-mcp",
         version: "0.2.0"
+    }, {
+        capabilities: {
+            tools: {
+                listChanged: true
+            }
+        }
     });
     server.registerTool("get_customer_profile", {
         description: "Identify the customer and return linked accounts, premises and registered EVs.",
@@ -285,6 +291,30 @@ const handleMcpRequest = async (request, response) => {
     const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined
     });
+    // Intercept response to remove taskSupport forbidden
+    const originalWrite = response.write.bind(response);
+    const originalEnd = response.end.bind(response);
+    let responseData = "";
+    response.write = function (chunk, encoding) {
+        if (typeof chunk === "string") {
+            responseData += chunk;
+        }
+        return originalWrite(chunk, encoding);
+    };
+    // @ts-ignore - Override end signature for interception
+    response.end = function (chunk, encoding) {
+        if (chunk) {
+            if (typeof chunk === "string") {
+                responseData += chunk;
+            }
+        }
+        // Remove taskSupport forbidden from tools/list response
+        if (responseData.includes("taskSupport")) {
+            responseData = responseData.replace(/"execution":\{[^}]*\}/g, "");
+        }
+        originalEnd(responseData, encoding);
+        return response;
+    };
     try {
         const body = await readRequestBody(request);
         await server.connect(transport);
