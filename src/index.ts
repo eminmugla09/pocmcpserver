@@ -412,42 +412,88 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
     request.headers.accept = "application/json, text/event-stream";
   }
 
+  const body = await readRequestBody(request);
+
+  // Handle initialize
+  if (body?.method === "initialize") {
+    const initResponse = {
+      jsonrpc: "2.0",
+      id: body.id,
+      result: {
+        protocolVersion: "2025-03-26",
+        capabilities: {
+          tools: { listChanged: true }
+        },
+        serverInfo: {
+          name: "fpl-agent-mcp",
+          version: "0.2.0"
+        }
+      }
+    };
+    setCorsHeaders(response);
+    response.writeHead(200, { "Content-Type": "text/event-stream" });
+    response.write(`event: message\ndata: ${JSON.stringify(initResponse)}\n\n`);
+    response.end();
+    return;
+  }
+
+  // Handle tools/list - manually construct response without execution field
+  if (body?.method === "tools/list") {
+    const server = createFplMcpServer();
+    const transport = new StdioServerTransport();
+
+    try {
+      // Create a mock stdio transport to get the tools list
+      // We'll use the server's internal method to get tools
+      const tools = [
+        { name: "get_customer_profile", description: "Identify the customer and return linked accounts, premises and registered EVs.", inputSchema: { type: "object", properties: { customer_number: { type: "string" }, phone: { type: "string" }, email: { type: "string" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+        { name: "lookup_account", description: "Resolve residential account records by account, customer, phone, email, premise, or address.", inputSchema: { type: "object", properties: { account_number: { type: "string" }, customer_number: { type: "string" }, phone: { type: "string" }, email: { type: "string" }, premise_number: { type: "string" }, address: { type: "string" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+        { name: "get_account_summary", description: "Return account status, standing, rate class, smart meter status, enrolled programs and flags.", inputSchema: { type: "object", properties: { account_number: { type: "string" } }, required: ["account_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+        { name: "get_premise_details", description: "Return premise details by premise number or service address.", inputSchema: { type: "object", properties: { premise_number: { type: "string" }, address: { type: "string" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+        { name: "get_billing_inquiry", description: "Return current bill, due date, charge breakdown, kWh usage and EV off-peak savings.", inputSchema: { type: "object", properties: { account_number: { type: "string" } }, required: ["account_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+        { name: "get_payment_history", description: "Return recent payment history and AutoPay scheduling details.", inputSchema: { type: "object", properties: { account_number: { type: "string" } }, required: ["account_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+        { name: "get_usage_history", description: "Return monthly kWh, cost and EV charging kWh trend history.", inputSchema: { type: "object", properties: { account_number: { type: "string" } }, required: ["account_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+        { name: "get_ev_enrollment", description: "Return FPL EVolution Home enrollment and charger details for an account.", inputSchema: { type: "object", properties: { account_number: { type: "string" } }, required: ["account_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+        { name: "check_ev_eligibility", description: "Return premise-specific FPL EVolution Home eligibility checks and recommended install type.", inputSchema: { type: "object", properties: { premise_number: { type: "string" } }, required: ["premise_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+        { name: "match_property_to_customer", description: "Match a North Palm Beach property-registration event to the customer.", inputSchema: { type: "object", properties: { address: { type: "string" } }, required: ["address"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+        { name: "get_service_connection_quote", description: "Return move-in connection quote, deposit status and earliest connection date for a premise.", inputSchema: { type: "object", properties: { premise_number: { type: "string" } }, required: ["premise_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+        { name: "start_service_connection", description: "Submit a new residential power connection request.", inputSchema: { type: "object", properties: { premise_number: { type: "string" }, account_number: { type: "string" }, requested_connect_date: { type: "string" } }, required: ["premise_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+        { name: "enroll_ev_charging", description: "Start FPL EVolution Home enrollment for a premise.", inputSchema: { type: "object", properties: { premise_number: { type: "string" }, install_type: { type: "string", enum: ["full", "equipment_only"] } }, required: ["premise_number", "install_type"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+        { name: "set_move_intent", description: "Record whether the customer is keeping both homes or moving out of Miami.", inputSchema: { type: "object", properties: { intent: { type: "string", enum: ["keep_both", "move_out_miami"] } }, required: ["intent"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } }
+      ];
+
+      const toolsResponse = {
+        jsonrpc: "2.0",
+        id: body.id,
+        result: { tools }
+      };
+      setCorsHeaders(response);
+      response.writeHead(200, { "Content-Type": "text/event-stream" });
+      response.write(`event: message\ndata: ${JSON.stringify(toolsResponse)}\n\n`);
+      response.end();
+    } catch (error) {
+      console.error("Error handling tools/list", error);
+      writeJson(response, 500, {
+        jsonrpc: "2.0",
+        error: {
+          code: -32603,
+          message: "Internal server error"
+        },
+        id: null
+      });
+    } finally {
+      await server.close();
+    }
+    return;
+  }
+
+  // Handle all other requests through transport
   const server = createFplMcpServer();
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined
   });
 
-  // Intercept response to remove taskSupport forbidden
-  const originalWrite = response.write.bind(response);
-  const originalEnd = response.end.bind(response);
-  let responseData = "";
-
-  response.write = function(chunk: any, encoding?: any) {
-    if (typeof chunk === "string") {
-      responseData += chunk;
-    }
-    return originalWrite(chunk, encoding);
-  };
-
-  // @ts-ignore - Override end signature for interception
-  response.end = function(chunk?: any, encoding?: any) {
-    if (chunk) {
-      if (typeof chunk === "string") {
-        responseData += chunk;
-      }
-    }
-
-    // Remove taskSupport forbidden from tools/list response
-    if (responseData.includes("taskSupport")) {
-      responseData = responseData.replace(/"execution":\{[^}]*\}/g, "");
-    }
-
-    originalEnd(responseData, encoding);
-    return response;
-  };
-
   try {
-    const body = await readRequestBody(request);
     await server.connect(transport);
     await transport.handleRequest(request, response, body);
   } catch (error) {
