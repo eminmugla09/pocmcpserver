@@ -400,6 +400,12 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
     return;
   }
 
+  // Inject Accept header if missing to satisfy StreamableHTTPServerTransport requirements
+  const acceptHeader = request.headers.accept;
+  if (!acceptHeader || (!acceptHeader.includes("application/json") || !acceptHeader.includes("text/event-stream"))) {
+    request.headers.accept = "application/json, text/event-stream";
+  }
+
   const server = createFplMcpServer();
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined
