@@ -414,8 +414,7 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
 
   const server = createFplMcpServer();
   const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: undefined,
-    enableExperimentalCapabilities: true
+    sessionIdGenerator: undefined
   });
 
   try {
@@ -449,12 +448,15 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
 
     // Handle tools/list - remove taskSupport forbidden
     if (body?.method === "tools/list") {
-      const tools = await server.listTools();
-      const toolsResponse = {
+      const toolsResponse = await server.request(
+        { method: "tools/list", params: {} },
+        { _meta: {} }
+      );
+      const cleanTools = {
         jsonrpc: "2.0",
         id: body.id,
         result: {
-          tools: tools.tools.map((tool: any) => ({
+          tools: toolsResponse.result.tools.map((tool: any) => ({
             name: tool.name,
             description: tool.description,
             inputSchema: tool.inputSchema
@@ -463,7 +465,7 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
       };
       setCorsHeaders(response);
       response.writeHead(200, { "Content-Type": "text/event-stream" });
-      response.write(`event: message\ndata: ${JSON.stringify(toolsResponse)}\n\n`);
+      response.write(`event: message\ndata: ${JSON.stringify(cleanTools)}\n\n`);
       response.end();
       await transport.close();
       await server.close();
@@ -472,14 +474,14 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
 
     // Handle tools/call
     if (body?.method === "tools/call") {
-      const result = await server.callTool({
-        name: body.params.name,
-        arguments: body.params.arguments
-      });
+      const result = await server.request(
+        { method: "tools/call", params: body.params },
+        { _meta: {} }
+      );
       const callResponse = {
         jsonrpc: "2.0",
         id: body.id,
-        result: result.content[0]
+        result: result.result
       };
       setCorsHeaders(response);
       response.writeHead(200, { "Content-Type": "text/event-stream" });
