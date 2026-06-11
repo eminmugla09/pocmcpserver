@@ -186,3 +186,14 @@ components:
               type: string
         id:
           type: "null"
+    Tool:
+      type: object
+      required: [name, description, inputSchema]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        inputSchema:
+          type: object
+          additionalProperties: true
