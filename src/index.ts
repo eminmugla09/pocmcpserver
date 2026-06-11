@@ -429,6 +429,7 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
     return originalWrite(chunk, encoding);
   };
 
+  // @ts-ignore - Override end signature for interception
   response.end = function(chunk?: any, encoding?: any) {
     if (chunk) {
       if (typeof chunk === "string") {
@@ -442,6 +443,7 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
     }
 
     originalEnd(responseData, encoding);
+    return response;
   };
 
   try {
