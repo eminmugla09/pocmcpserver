@@ -421,6 +421,76 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
   try {
     const body = await readRequestBody(request);
     await server.connect(transport);
+
+    // Handle initialize
+    if (body?.method === "initialize") {
+      const initResponse = {
+        jsonrpc: "2.0",
+        id: body.id,
+        result: {
+          protocolVersion: "2025-03-26",
+          capabilities: {
+            tools: { listChanged: true }
+          },
+          serverInfo: {
+            name: "fpl-agent-mcp",
+            version: "0.2.0"
+          }
+        }
+      };
+      setCorsHeaders(response);
+      response.writeHead(200, { "Content-Type": "text/event-stream" });
+      response.write(`event: message\ndata: ${JSON.stringify(initResponse)}\n\n`);
+      response.end();
+      await transport.close();
+      await server.close();
+      return;
+    }
+
+    // Handle tools/list - remove taskSupport forbidden
+    if (body?.method === "tools/list") {
+      const tools = await server.listTools();
+      const toolsResponse = {
+        jsonrpc: "2.0",
+        id: body.id,
+        result: {
+          tools: tools.tools.map((tool: any) => ({
+            name: tool.name,
+            description: tool.description,
+            inputSchema: tool.inputSchema
+          }))
+        }
+      };
+      setCorsHeaders(response);
+      response.writeHead(200, { "Content-Type": "text/event-stream" });
+      response.write(`event: message\ndata: ${JSON.stringify(toolsResponse)}\n\n`);
+      response.end();
+      await transport.close();
+      await server.close();
+      return;
+    }
+
+    // Handle tools/call
+    if (body?.method === "tools/call") {
+      const result = await server.callTool({
+        name: body.params.name,
+        arguments: body.params.arguments
+      });
+      const callResponse = {
+        jsonrpc: "2.0",
+        id: body.id,
+        result: result.content[0]
+      };
+      setCorsHeaders(response);
+      response.writeHead(200, { "Content-Type": "text/event-stream" });
+      response.write(`event: message\ndata: ${JSON.stringify(callResponse)}\n\n`);
+      response.end();
+      await transport.close();
+      await server.close();
+      return;
+    }
+
+    // Default to transport handler for other methods
     await transport.handleRequest(request, response, body);
   } catch (error) {
     console.error("Error handling MCP request", error);
