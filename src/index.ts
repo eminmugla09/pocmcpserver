@@ -414,7 +414,8 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
 
   const server = createFplMcpServer();
   const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: undefined
+    sessionIdGenerator: undefined,
+    enableExperimentalCapabilities: true
   });
 
   try {
