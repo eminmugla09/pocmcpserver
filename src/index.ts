@@ -406,11 +406,8 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
     return;
   }
 
-  // Inject Accept header if missing to satisfy StreamableHTTPServerTransport requirements
-  const acceptHeader = request.headers.accept;
-  if (!acceptHeader || (!acceptHeader.includes("application/json") || !acceptHeader.includes("text/event-stream"))) {
-    request.headers.accept = "application/json, text/event-stream";
-  }
+  // Always inject Accept header to satisfy StreamableHTTPServerTransport requirements
+  request.headers.accept = "application/json, text/event-stream";
 
   const body = await readRequestBody(request);
 
@@ -482,6 +479,33 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
         id: null
       });
     } finally {
+      await server.close();
+    }
+    return;
+  }
+
+  // Handle tools/call - ensure Accept header is set
+  if (body?.method === "tools/call") {
+    const server = createFplMcpServer();
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined
+    });
+
+    try {
+      await server.connect(transport);
+      await transport.handleRequest(request, response, body);
+    } catch (error) {
+      console.error("Error handling tools/call", error);
+      writeJson(response, 500, {
+        jsonrpc: "2.0",
+        error: {
+          code: -32603,
+          message: "Internal server error"
+        },
+        id: null
+      });
+    } finally {
+      await transport.close();
       await server.close();
     }
     return;
