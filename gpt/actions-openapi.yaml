@@ -1,226 +1,438 @@
 openapi: 3.1.0
 info:
-  title: FPL EV ChatGPT MCP
-  version: 0.3.0
-  description: Railway-hosted Streamable HTTP MCP endpoint for the data-backed FPL EV tools.
+  title: FPL EV ChatGPT Actions
+  version: 1.0.0
+  description: FPL EVolution Home customer service actions for account lookup, billing, EV enrollment, and service connections.
 servers:
-  - url: https://pocserver.up.railway.app
+  - url: https://fplpoc.up.railway.app
 paths:
-  /health:
-    get:
-      operationId: getHealth
-      summary: Check MCP server health
-      responses:
-        "200":
-          description: Server health response
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [status, mcpPath]
-                properties:
-                  status:
-                    type: string
-                    example: ok
-                  mcpPath:
-                    type: string
-                    example: /mcp
-                  privacyPath:
-                    type: string
-                    example: /privacy
-  /privacy:
-    get:
-      operationId: getPrivacyNotice
-      summary: Get privacy notice
-      description: Public privacy notice for the FPL EV ChatGPT MCP server.
-      responses:
-        "200":
-          description: Privacy notice HTML page
-          content:
-            text/html:
-              schema:
-                type: string
-  /mcp:
+  /actions/check_ev_eligibility:
     post:
-      operationId: postMcpJsonRpc
-      summary: Call the MCP Streamable HTTP endpoint
-      description: Send JSON-RPC to MCP. After `initialize`, use `tools/call` for property, account, billing, or EV checks; do not answer from initialize alone. For tools/call, params must include both 'name' and 'arguments'.
+      operationId: check_ev_eligibility
+      summary: Check EV eligibility
+      description: Return premise-specific FPL EVolution Home eligibility checks and recommended install type.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/JsonRpcRequest"
-            examples:
-              initialize:
-                summary: Initialize MCP session
-                value:
-                  jsonrpc: "2.0"
-                  id: 1
-                  method: initialize
-                  params:
-                    protocolVersion: "2025-03-26"
-                    capabilities: {}
-                    clientInfo:
-                      name: curl-test
-                      version: 0.0.1
-              listTools:
-                summary: List MCP tools
-                value:
-                  jsonrpc: "2.0"
-                  id: 2
-                  method: tools/list
-                  params: {}
-              getCustomerProfile:
-                summary: Call get_customer_profile
-                value:
-                  jsonrpc: "2.0"
-                  id: 3
-                  method: tools/call
-                  params:
-                    name: get_customer_profile
-                    arguments:
-                      phone: 305-555-0142
-              lookupAccount:
-                summary: Call lookup_account
-                value:
-                  jsonrpc: "2.0"
-                  id: 4
-                  method: tools/call
-                  params:
-                    name: lookup_account
-                    arguments:
-                      phone: 305-555-0142
-              matchPropertyToCustomer:
-                summary: Call match_property_to_customer
-                value:
-                  jsonrpc: "2.0"
-                  id: 5
-                  method: tools/call
-                  params:
-                    name: match_property_to_customer
-                    arguments:
-                      address: 320 Anchorage Dr, North Palm Beach, FL 33408
-              checkEvEligibility:
-                summary: Call check_ev_eligibility
-                value:
-                  jsonrpc: "2.0"
-                  id: 6
-                  method: tools/call
-                  params:
-                    name: check_ev_eligibility
-                    arguments:
-                      premise_number: "60587744"
+              type: object
+              required: [premise_number]
+              properties:
+                premise_number:
+                  type: string
       responses:
         "200":
-          description: MCP JSON-RPC response, usually returned as text/event-stream by the Streamable HTTP transport.
-          content:
-            text/event-stream:
-              schema:
-                type: string
-                example: |
-                  event: message
-                  data: {"result":{"serverInfo":{"name":"fpl-agent-mcp","version":"0.2.0"}},"jsonrpc":"2.0","id":1}
-            application/json:
-              schema:
-                $ref: "#/components/schemas/JsonRpcResponse"
-        "405":
-          description: Method not allowed. Use POST for /mcp.
+          description: Eligibility check result
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/JsonRpcErrorResponse"
-components:
-  schemas:
-    JsonRpcRequest:
-      type: object
-      required: [jsonrpc, id, method, params]
-      properties:
-        jsonrpc:
-          type: string
-          const: "2.0"
-        id:
-          oneOf:
-            - type: string
-            - type: integer
-        method:
-          type: string
-          enum:
-            - initialize
-            - tools/list
-            - tools/call
-        params:
-          type: object
-          properties:
-            protocolVersion:
-              type: string
-            capabilities:
-              type: object
-            clientInfo:
-              type: object
-            name:
-              type: string
-              description: The name of the tool to call (required for tools/call)
-            arguments:
-              type: object
-              description: The arguments to pass to the tool (required for tools/call)
-    JsonRpcResponse:
-      type: object
-      properties:
-        jsonrpc:
-          type: string
-          example: "2.0"
-        id:
-          oneOf:
-            - type: string
-            - type: integer
-            - type: "null"
-        result:
-          type: object
-          additionalProperties: true
-        error:
-          type: object
-          additionalProperties: true
-    JsonRpcErrorResponse:
-      type: object
-      required: [jsonrpc, error, id]
-      properties:
-        jsonrpc:
-          type: string
-          example: "2.0"
-        error:
-          type: object
-          required: [code, message]
-          properties:
-            code:
-              type: integer
-            message:
-              type: string
-        id:
-          type: "null"
-    Tool:
-      type: object
-      required: [name, description, inputSchema]
-      properties:
-        name:
-          type: string
-        description:
-          type: string
-        inputSchema:
-          type: object
-          additionalProperties: true
-    ToolCallResponse:
-      type: object
-      required: [content]
-      properties:
+                type: object
+                properties:
+                  eligible:
+                    type: boolean
+                  recommendedInstallType:
+                    type: string
+                    enum: [full, equipment_only]
+                  premiseNumber:
+                    type: string
+  /actions/enroll_ev_charging:
+    post:
+      operationId: enroll_ev_charging
+      summary: Enroll in EV charging
+      description: Mock action that starts FPL EVolution Home enrollment for a premise.
+      requestBody:
+        required: true
         content:
-          type: array
-          items:
-            type: object
-            required: [type, text]
-            properties:
-              type:
-                type: string
-                const: text
-              text:
-                type: string
+          application/json:
+            schema:
+              type: object
+              required: [premise_number, install_type]
+              properties:
+                premise_number:
+                  type: string
+                install_type:
+                  type: string
+                  enum: [full, equipment_only]
+      responses:
+        "200":
+          description: Enrollment result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  request:
+                    type: object
+                  enrollmentId:
+                    type: string
+  /actions/get_account_summary:
+    post:
+      operationId: get_account_summary
+      summary: Get account summary
+      description: Return account status, standing, rate class, smart meter status, enrolled programs and flags.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [account_number]
+              properties:
+                account_number:
+                  type: string
+      responses:
+        "200":
+          description: Account summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accountNumber:
+                    type: string
+                  status:
+                    type: string
+                  standing:
+                    type: string
+                  rateClass:
+                    type: string
+                  smartMeterFlag:
+                    type: boolean
+                  enrolledPrograms:
+                    type: array
+                    items:
+                      type: string
+  /actions/get_billing_inquiry:
+    post:
+      operationId: get_billing_inquiry
+      summary: Get billing inquiry
+      description: Return current bill, due date, charge breakdown, kWh usage and EV off-peak savings.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [account_number]
+              properties:
+                account_number:
+                  type: string
+      responses:
+        "200":
+          description: Billing information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accountNumber:
+                    type: string
+                  currentBill:
+                    type: number
+                  dueDate:
+                    type: string
+                  charges:
+                    type: array
+                    items:
+                      type: object
+                  kWhUsage:
+                    type: number
+                  evOffPeakSavings:
+                    type: number
+  /actions/get_customer_profile:
+    post:
+      operationId: get_customer_profile
+      summary: Get customer profile
+      description: Identify the synthetic demo customer and return linked accounts, premises and registered EVs.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                customer_number:
+                  type: string
+                phone:
+                  type: string
+                email:
+                  type: string
+      responses:
+        "200":
+          description: Customer profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  found:
+                    type: boolean
+                  customerNumber:
+                    type: string
+                  accounts:
+                    type: array
+                    items:
+                      type: object
+                  premises:
+                    type: array
+                    items:
+                      type: object
+  /actions/get_ev_enrollment:
+    post:
+      operationId: get_ev_enrollment
+      summary: Get EV enrollment
+      description: Return FPL EVolution Home enrollment and charger details for an account.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [account_number]
+              properties:
+                account_number:
+                  type: string
+      responses:
+        "200":
+          description: EV enrollment details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enrolled:
+                    type: boolean
+                  chargerDetails:
+                    type: object
+  /actions/get_payment_history:
+    post:
+      operationId: get_payment_history
+      summary: Get payment history
+      description: Return recent payment history and AutoPay scheduling details.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [account_number]
+              properties:
+                account_number:
+                  type: string
+      responses:
+        "200":
+          description: Payment history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payments:
+                    type: array
+                    items:
+                      type: object
+                  autopayEnrolled:
+                    type: boolean
+                  nextScheduledPaymentDate:
+                    type: string
+  /actions/get_premise_details:
+    post:
+      operationId: get_premise_details
+      summary: Get premise details
+      description: Return premise details by premise number or service address.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                premise_number:
+                  type: string
+                address:
+                  type: string
+      responses:
+        "200":
+          description: Premise details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  premiseNumber:
+                    type: string
+                  address:
+                    type: object
+                  propertyType:
+                    type: string
+                  serviceStatus:
+                    type: string
+                  smartMeterFlag:
+                    type: boolean
+                  evolutionHomeEligible:
+                    type: boolean
+                  evolutionHomeEnrolled:
+                    type: boolean
+  /actions/get_service_connection_quote:
+    post:
+      operationId: get_service_connection_quote
+      summary: Get service connection quote
+      description: Return move-in connection quote, deposit status and earliest connection date for a premise.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [premise_number]
+              properties:
+                premise_number:
+                  type: string
+      responses:
+        "200":
+          description: Connection quote
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  premiseNumber:
+                    type: string
+                  depositRequired:
+                    type: boolean
+                  depositAmount:
+                    type: number
+                  earliestConnectDate:
+                    type: string
+                  connectionFee:
+                    type: number
+  /actions/get_usage_history:
+    post:
+      operationId: get_usage_history
+      summary: Get usage history
+      description: Return monthly kWh, cost and EV charging kWh trend history.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [account_number]
+              properties:
+                account_number:
+                  type: string
+      responses:
+        "200":
+          description: Usage history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    month:
+                      type: string
+                    kWh:
+                      type: number
+                    cost:
+                      type: number
+                    evChargingKWh:
+                      type: number
+  /actions/match_property_to_customer:
+    post:
+      operationId: match_property_to_customer
+      summary: Match property to customer
+      description: Simulate matching a North Palm Beach property-registration event to the synthetic customer.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [address]
+              properties:
+                address:
+                  type: string
+      responses:
+        "200":
+          description: Property matching result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  matched:
+                    type: boolean
+                  matchedCustomer:
+                    type: string
+                  premiseNumber:
+                    type: string
+                  event:
+                    type: string
+  /actions/set_move_intent:
+    post:
+      operationId: set_move_intent
+      summary: Set move intent
+      description: Mock action that records whether the customer is keeping both homes or moving out of Miami.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [intent]
+              properties:
+                intent:
+                  type: string
+                  enum: [keep_both, move_out_miami]
+      responses:
+        "200":
+          description: Move intent result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  request:
+                    type: object
+                  recordedIntent:
+                    type: string
+  /actions/start_service_connection:
+    post:
+      operationId: start_service_connection
+      summary: Start service connection
+      description: Mock action that submits a new residential power connection request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [premise_number]
+              properties:
+                premise_number:
+                  type: string
+                account_number:
+                  type: string
+                requested_connect_date:
+                  type: string
+      responses:
+        "200":
+          description: Service connection result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  request:
+                    type: object
+                  confirmationNumber:
+                    type: string

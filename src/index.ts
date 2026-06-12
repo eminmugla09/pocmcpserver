@@ -687,6 +687,21 @@ const startHttpServer = () => {
   createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
 
+    // Serve OpenAPI spec at root for ChatGPT Actions
+    if (url.pathname === "/" || url.pathname === "/openapi.yaml") {
+      const fs = await import("fs");
+      const path = await import("path");
+      const schemaPath = path.join(process.cwd(), "gpt", "actions-openapi.yaml");
+      try {
+        const schemaContent = fs.readFileSync(schemaPath, "utf-8");
+        response.writeHead(200, { "Content-Type": "text/yaml" });
+        response.end(schemaContent);
+      } catch (error) {
+        writeJson(response, 404, { error: "Schema file not found" });
+      }
+      return;
+    }
+
     if (url.pathname === "/health") {
       writeJson(response, 200, { status: "ok", mcpPath: "/mcp", privacyPath: "/privacy", schemaPath: "/gpt/actions-openapi.yaml" });
       return;
@@ -712,6 +727,70 @@ const startHttpServer = () => {
         response.end(schemaContent);
       } catch (error) {
         writeJson(response, 404, { error: "Schema file not found" });
+      }
+      return;
+    }
+
+    // Handle REST action endpoints for ChatGPT Actions
+    if (url.pathname.startsWith("/actions/")) {
+      if (request.method !== "POST") {
+        writeJson(response, 405, { error: "Method not allowed. Use POST." });
+        return;
+      }
+
+      const actionName = url.pathname.replace("/actions/", "");
+      const body = await readRequestBody(request);
+
+      try {
+        let result;
+        switch (actionName) {
+          case "check_ev_eligibility":
+            result = await checkEvEligibilityHandler(body);
+            break;
+          case "enroll_ev_charging":
+            result = await enrollEvChargingHandler(body);
+            break;
+          case "get_account_summary":
+            result = await getAccountSummaryHandler(body);
+            break;
+          case "get_billing_inquiry":
+            result = await getBillingInquiryHandler(body);
+            break;
+          case "get_customer_profile":
+            result = await getCustomerProfileHandler(body);
+            break;
+          case "get_ev_enrollment":
+            result = await getEvEnrollmentHandler(body);
+            break;
+          case "get_payment_history":
+            result = await getPaymentHistoryHandler(body);
+            break;
+          case "get_premise_details":
+            result = await getPremiseDetailsHandler(body);
+            break;
+          case "get_service_connection_quote":
+            result = await getServiceConnectionQuoteHandler(body);
+            break;
+          case "get_usage_history":
+            result = await getUsageHistoryHandler(body);
+            break;
+          case "match_property_to_customer":
+            result = await matchPropertyToCustomerHandler(body);
+            break;
+          case "set_move_intent":
+            result = await setMoveIntentHandler(body);
+            break;
+          case "start_service_connection":
+            result = await startServiceConnectionHandler(body);
+            break;
+          default:
+            writeJson(response, 404, { error: "Action not found" });
+            return;
+        }
+        writeJson(response, 200, result);
+      } catch (error) {
+        console.error("Error handling action", error);
+        writeJson(response, 500, { error: "Internal server error" });
       }
       return;
     }
