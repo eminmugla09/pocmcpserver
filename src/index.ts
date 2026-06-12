@@ -664,32 +664,16 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
     return;
   }
 
-  // Handle all other requests through transport
-  const server = createFplMcpServer();
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: undefined
+  // Handle all other methods (not initialize, tools/list, tools/call)
+  // For now, return an error for unsupported methods
+  writeJson(response, 400, {
+    jsonrpc: "2.0",
+    error: {
+      code: -32601,
+      message: "Method not found or not supported"
+    },
+    id: body?.id ?? null
   });
-
-  try {
-    await server.connect(transport);
-    await transport.handleRequest(request, response, body);
-  } catch (error) {
-    console.error("Error handling MCP request", error);
-
-    if (!response.headersSent) {
-      writeJson(response, 500, {
-        jsonrpc: "2.0",
-        error: {
-          code: -32603,
-          message: "Internal server error"
-        },
-        id: null
-      });
-    }
-  } finally {
-    await transport.close();
-    await server.close();
-  }
 };
 
 const startHttpServer = () => {
