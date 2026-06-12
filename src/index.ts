@@ -1,7 +1,8 @@
+import { readFileSync } from "node:fs";
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
+import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import mockDataJson from "../data/mock_data.json" with { type: "json" };
 
@@ -452,6 +453,19 @@ const writeHtml = (response: ServerResponse, statusCode: number, html: string) =
   response.end(html);
 };
 
+const writeOpenApiSchema = (response: ServerResponse) => {
+  const schemaPath = join(process.cwd(), "gpt", "actions-openapi.yaml");
+
+  try {
+    const schemaContent = readFileSync(schemaPath, "utf-8");
+    response.writeHead(200, { "Content-Type": "text/yaml" });
+    response.end(schemaContent);
+  } catch (error) {
+    console.error("Error reading OpenAPI schema", error);
+    writeJson(response, 404, { error: "Schema file not found" });
+  }
+};
+
 const privacyPageHtml = `<!doctype html>
 <html lang="en">
   <head>
@@ -539,7 +553,6 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
   // Handle tools/list - manually construct response without execution field
   if (body?.method === "tools/list") {
     const server = createFplMcpServer();
-    const transport = new StdioServerTransport();
 
     try {
       // Create a mock stdio transport to get the tools list
@@ -689,16 +702,7 @@ const startHttpServer = () => {
 
     // Serve OpenAPI spec at root for ChatGPT Actions
     if (url.pathname === "/" || url.pathname === "/openapi.yaml") {
-      const fs = await import("fs");
-      const path = await import("path");
-      const schemaPath = path.join(process.cwd(), "gpt", "actions-openapi.yaml");
-      try {
-        const schemaContent = fs.readFileSync(schemaPath, "utf-8");
-        response.writeHead(200, { "Content-Type": "text/yaml" });
-        response.end(schemaContent);
-      } catch (error) {
-        writeJson(response, 404, { error: "Schema file not found" });
-      }
+      writeOpenApiSchema(response);
       return;
     }
 
@@ -718,16 +722,7 @@ const startHttpServer = () => {
     }
 
     if (url.pathname === "/gpt/actions-openapi.yaml") {
-      const fs = await import("fs");
-      const path = await import("path");
-      const schemaPath = path.join(process.cwd(), "gpt", "actions-openapi.yaml");
-      try {
-        const schemaContent = fs.readFileSync(schemaPath, "utf-8");
-        response.writeHead(200, { "Content-Type": "text/yaml" });
-        response.end(schemaContent);
-      } catch (error) {
-        writeJson(response, 404, { error: "Schema file not found" });
-      }
+      writeOpenApiSchema(response);
       return;
     }
 

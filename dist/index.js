@@ -1,4 +1,6 @@
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -291,7 +293,7 @@ const readRequestBody = async (request) => {
 const setCorsHeaders = (response) => {
     response.setHeader("Access-Control-Allow-Origin", "*");
     response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    response.setHeader("Access-Control-Allow-Headers", "Content-Type, Mcp-Session-Id, mcp-session-id");
+    response.setHeader("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, Mcp-Session-Id, mcp-session-id");
     response.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id, mcp-session-id");
 };
 const writeJson = (response, statusCode, payload) => {
@@ -303,6 +305,18 @@ const writeHtml = (response, statusCode, html) => {
     setCorsHeaders(response);
     response.writeHead(statusCode, { "Content-Type": "text/html; charset=utf-8" });
     response.end(html);
+};
+const writeOpenApiSchema = (response) => {
+    const schemaPath = join(process.cwd(), "gpt", "actions-openapi.yaml");
+    try {
+        const schemaContent = readFileSync(schemaPath, "utf-8");
+        response.writeHead(200, { "Content-Type": "text/yaml" });
+        response.end(schemaContent);
+    }
+    catch (error) {
+        console.error("Error reading OpenAPI schema", error);
+        writeJson(response, 404, { error: "Schema file not found" });
+    }
 };
 const privacyPageHtml = `<!doctype html>
 <html lang="en">
@@ -384,7 +398,6 @@ const handleMcpRequest = async (request, response) => {
     // Handle tools/list - manually construct response without execution field
     if (body?.method === "tools/list") {
         const server = createFplMcpServer();
-        const transport = new StdioServerTransport();
         try {
             // Create a mock stdio transport to get the tools list
             // We'll use the server's internal method to get tools
@@ -527,17 +540,7 @@ const startHttpServer = () => {
         const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
         // Serve OpenAPI spec at root for ChatGPT Actions
         if (url.pathname === "/" || url.pathname === "/openapi.yaml") {
-            const fs = await import("fs");
-            const path = await import("path");
-            const schemaPath = path.join(process.cwd(), "gpt", "actions-openapi.yaml");
-            try {
-                const schemaContent = fs.readFileSync(schemaPath, "utf-8");
-                response.writeHead(200, { "Content-Type": "text/yaml" });
-                response.end(schemaContent);
-            }
-            catch (error) {
-                writeJson(response, 404, { error: "Schema file not found" });
-            }
+            writeOpenApiSchema(response);
             return;
         }
         if (url.pathname === "/health") {
@@ -553,17 +556,7 @@ const startHttpServer = () => {
             return;
         }
         if (url.pathname === "/gpt/actions-openapi.yaml") {
-            const fs = await import("fs");
-            const path = await import("path");
-            const schemaPath = path.join(process.cwd(), "gpt", "actions-openapi.yaml");
-            try {
-                const schemaContent = fs.readFileSync(schemaPath, "utf-8");
-                response.writeHead(200, { "Content-Type": "text/yaml" });
-                response.end(schemaContent);
-            }
-            catch (error) {
-                writeJson(response, 404, { error: "Schema file not found" });
-            }
+            writeOpenApiSchema(response);
             return;
         }
         // Handle REST action endpoints for ChatGPT Actions
