@@ -69,6 +69,107 @@ const findAccounts = (input: {
   });
 };
 
+// Tool handler functions for direct invocation
+const getCustomerProfileHandler = async (args: any) => {
+  const { customer_number, phone, email } = args;
+  const matchesCustomerNumber = !customer_number || customer_number === mockData.customer.customerNumber;
+  const matchesPhone = !phone || phone === mockData.customer.mobilePhone;
+  const matchesEmail = !email || email.toLowerCase() === String(mockData.customer.email).toLowerCase();
+
+  if (!matchesCustomerNumber || !matchesPhone || !matchesEmail) {
+    return { found: false, message: "No matching customer profile found." };
+  }
+
+  return mockData.customer;
+};
+
+const lookupAccountHandler = async (input: any) => {
+  const accounts = findAccounts(input);
+  const premiseNumbers = new Set(accounts.map((account) => account.premiseNumber as string));
+  const premises = [...premiseNumbers].map((premiseNumber) => mockData.premises[premiseNumber]).filter(Boolean);
+
+  if (accounts.length === 0) {
+    return {
+      found: false,
+      message: "No matching account found. Ask the customer for one lookup value: phone number, email address, account number, customer number, premise number, or service address. For voice, ask one question at a time."
+    };
+  }
+
+  return {
+    found: true,
+    customerNumber: mockData.customer.customerNumber,
+    accounts,
+    premises
+  };
+};
+
+const getAccountSummaryHandler = async ({ account_number }: any) => 
+  mockData.accounts[account_number] ?? { found: false };
+
+const getPremiseDetailsHandler = async ({ premise_number, address }: any) => {
+  let premise: Record<string, unknown> | undefined;
+
+  if (premise_number) {
+    premise = mockData.premises[premise_number];
+  } else if (address) {
+    premise = findPremiseByAddress(address);
+  }
+
+  return premise ?? { found: false };
+};
+
+const getBillingInquiryHandler = async ({ account_number }: any) => 
+  mockData.billing[account_number]?.currentBill ?? { found: false };
+
+const getPaymentHistoryHandler = async ({ account_number }: any) => ({
+  payments: mockData.payment_history[account_number] ?? [],
+  autopayEnrolled: mockData.billing[account_number]?.autopayEnrolled ?? false,
+  nextScheduledPaymentDate: mockData.billing[account_number]?.nextScheduledPaymentDate
+});
+
+const getUsageHistoryHandler = async ({ account_number }: any) => 
+  mockData.usage_history[account_number] ?? [];
+
+const getEvEnrollmentHandler = async ({ account_number }: any) => 
+  mockData.ev_enrollments[account_number] ?? { enrolled: false };
+
+const checkEvEligibilityHandler = async ({ premise_number }: any) => 
+  mockData.ev_eligibility[premise_number] ?? { eligible: false, found: false };
+
+const matchPropertyToCustomerHandler = async ({ address }: any) => {
+  const premise = findPremiseByAddress(address);
+
+  if (premise?.premiseNumber !== "60587744") {
+    return { matched: false, event: "NO_MATCH" };
+  }
+
+  return {
+    matchedCustomer: "1009988776",
+    premiseNumber: "60587744",
+    event: "NEW_OWNER_RECORDED",
+    recordedDate: "2026-06-05",
+    existingServices: ["FPL EVolution Home @ premise 60412233", "Registered EV: Tesla Model Y"]
+  };
+};
+
+const getServiceConnectionQuoteHandler = async ({ premise_number }: any) => 
+  mockData.service_connection_quote[premise_number] ?? { found: false };
+
+const startServiceConnectionHandler = async (input: any) => ({
+  ...(mockData.action_responses.start_service_connection as Record<string, unknown>),
+  request: input
+});
+
+const enrollEvChargingHandler = async (input: any) => ({
+  ...(mockData.action_responses.enroll_ev_charging as Record<string, unknown>),
+  request: input
+});
+
+const setMoveIntentHandler = async (input: any) => ({
+  ...(mockData.action_responses.set_move_intent as Record<string, unknown>),
+  request: input
+});
+
 const createFplMcpServer = () => {
   const server = new McpServer({
     name: "fpl-agent-mcp",
@@ -407,6 +508,7 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
   }
 
   // Always inject Accept header to satisfy StreamableHTTPServerTransport requirements
+  // @ts-ignore - Modifying headers is allowed in Node.js
   request.headers.accept = "application/json, text/event-stream";
 
   const body = await readRequestBody(request);
@@ -484,16 +586,70 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
     return;
   }
 
-  // Handle tools/call - ensure Accept header is set
+  // Handle tools/call - manually handle to bypass transport header requirements
   if (body?.method === "tools/call") {
-    const server = createFplMcpServer();
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined
-    });
-
     try {
-      await server.connect(transport);
-      await transport.handleRequest(request, response, body);
+      // Directly call the tool handler based on the tool name
+      const toolName = body.params.name;
+      const toolArgs = body.params.arguments || {};
+      
+      let result;
+      switch (toolName) {
+        case "get_customer_profile":
+          result = await getCustomerProfileHandler(toolArgs);
+          break;
+        case "lookup_account":
+          result = await lookupAccountHandler(toolArgs);
+          break;
+        case "get_account_summary":
+          result = await getAccountSummaryHandler(toolArgs);
+          break;
+        case "get_premise_details":
+          result = await getPremiseDetailsHandler(toolArgs);
+          break;
+        case "get_billing_inquiry":
+          result = await getBillingInquiryHandler(toolArgs);
+          break;
+        case "get_payment_history":
+          result = await getPaymentHistoryHandler(toolArgs);
+          break;
+        case "get_usage_history":
+          result = await getUsageHistoryHandler(toolArgs);
+          break;
+        case "get_ev_enrollment":
+          result = await getEvEnrollmentHandler(toolArgs);
+          break;
+        case "check_ev_eligibility":
+          result = await checkEvEligibilityHandler(toolArgs);
+          break;
+        case "match_property_to_customer":
+          result = await matchPropertyToCustomerHandler(toolArgs);
+          break;
+        case "get_service_connection_quote":
+          result = await getServiceConnectionQuoteHandler(toolArgs);
+          break;
+        case "start_service_connection":
+          result = await startServiceConnectionHandler(toolArgs);
+          break;
+        case "enroll_ev_charging":
+          result = await enrollEvChargingHandler(toolArgs);
+          break;
+        case "set_move_intent":
+          result = await setMoveIntentHandler(toolArgs);
+          break;
+        default:
+          throw new Error(`Unknown tool: ${toolName}`);
+      }
+
+      const callResponse = {
+        jsonrpc: "2.0",
+        id: body.id,
+        result: { content: [{ type: "text", text: JSON.stringify(result) }] }
+      };
+      setCorsHeaders(response);
+      response.writeHead(200, { "Content-Type": "text/event-stream" });
+      response.write(`event: message\ndata: ${JSON.stringify(callResponse)}\n\n`);
+      response.end();
     } catch (error) {
       console.error("Error handling tools/call", error);
       writeJson(response, 500, {
@@ -504,9 +660,6 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
         },
         id: null
       });
-    } finally {
-      await transport.close();
-      await server.close();
     }
     return;
   }
