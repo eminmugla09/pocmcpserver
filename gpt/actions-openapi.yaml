@@ -133,11 +133,6 @@ paths:
 components:
   schemas:
     JsonRpcRequest:
-      oneOf:
-        - $ref: "#/components/schemas/InitializeRequest"
-        - $ref: "#/components/schemas/ListToolsRequest"
-        - $ref: "#/components/schemas/CallToolRequest"
-    InitializeRequest:
       type: object
       required: [jsonrpc, id, method, params]
       properties:
@@ -150,7 +145,10 @@ components:
             - type: integer
         method:
           type: string
-          const: initialize
+          enum:
+            - initialize
+            - tools/list
+            - tools/call
         params:
           type: object
           properties:
@@ -160,46 +158,12 @@ components:
               type: object
             clientInfo:
               type: object
-    ListToolsRequest:
-      type: object
-      required: [jsonrpc, id, method, params]
-      properties:
-        jsonrpc:
-          type: string
-          const: "2.0"
-        id:
-          oneOf:
-            - type: string
-            - type: integer
-        method:
-          type: string
-          const: tools/list
-        params:
-          type: object
-    CallToolRequest:
-      type: object
-      required: [jsonrpc, id, method, params]
-      properties:
-        jsonrpc:
-          type: string
-          const: "2.0"
-        id:
-          oneOf:
-            - type: string
-            - type: integer
-        method:
-          type: string
-          const: tools/call
-        params:
-          type: object
-          required: [name, arguments]
-          properties:
             name:
               type: string
-              description: The name of the tool to call
+              description: The name of the tool to call (required for tools/call)
             arguments:
               type: object
-              description: The arguments to pass to the tool
+              description: The arguments to pass to the tool (required for tools/call)
     JsonRpcResponse:
       type: object
       properties:
