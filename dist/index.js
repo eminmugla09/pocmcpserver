@@ -1,7 +1,6 @@
 import { createServer } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import mockDataJson from "../data/mock_data.json" with { type: "json" };
 const mockData = mockDataJson;
@@ -39,6 +38,80 @@ const findAccounts = (input) => {
         return matchesAccountNumber && matchesPremiseNumber;
     });
 };
+// Tool handler functions for direct invocation
+const getCustomerProfileHandler = async (args) => {
+    const { customer_number, phone, email } = args;
+    const matchesCustomerNumber = !customer_number || customer_number === mockData.customer.customerNumber;
+    const matchesPhone = !phone || phone === mockData.customer.mobilePhone;
+    const matchesEmail = !email || email.toLowerCase() === String(mockData.customer.email).toLowerCase();
+    if (!matchesCustomerNumber || !matchesPhone || !matchesEmail) {
+        return { found: false, message: "No matching customer profile found." };
+    }
+    return mockData.customer;
+};
+const lookupAccountHandler = async (input) => {
+    const accounts = findAccounts(input);
+    const premiseNumbers = new Set(accounts.map((account) => account.premiseNumber));
+    const premises = [...premiseNumbers].map((premiseNumber) => mockData.premises[premiseNumber]).filter(Boolean);
+    if (accounts.length === 0) {
+        return {
+            found: false,
+            message: "No matching account found. Ask the customer for one lookup value: phone number, email address, account number, customer number, premise number, or service address. For voice, ask one question at a time."
+        };
+    }
+    return {
+        found: true,
+        customerNumber: mockData.customer.customerNumber,
+        accounts,
+        premises
+    };
+};
+const getAccountSummaryHandler = async ({ account_number }) => mockData.accounts[account_number] ?? { found: false };
+const getPremiseDetailsHandler = async ({ premise_number, address }) => {
+    let premise;
+    if (premise_number) {
+        premise = mockData.premises[premise_number];
+    }
+    else if (address) {
+        premise = findPremiseByAddress(address);
+    }
+    return premise ?? { found: false };
+};
+const getBillingInquiryHandler = async ({ account_number }) => mockData.billing[account_number]?.currentBill ?? { found: false };
+const getPaymentHistoryHandler = async ({ account_number }) => ({
+    payments: mockData.payment_history[account_number] ?? [],
+    autopayEnrolled: mockData.billing[account_number]?.autopayEnrolled ?? false,
+    nextScheduledPaymentDate: mockData.billing[account_number]?.nextScheduledPaymentDate
+});
+const getUsageHistoryHandler = async ({ account_number }) => mockData.usage_history[account_number] ?? [];
+const getEvEnrollmentHandler = async ({ account_number }) => mockData.ev_enrollments[account_number] ?? { enrolled: false };
+const checkEvEligibilityHandler = async ({ premise_number }) => mockData.ev_eligibility[premise_number] ?? { eligible: false, found: false };
+const matchPropertyToCustomerHandler = async ({ address }) => {
+    const premise = findPremiseByAddress(address);
+    if (premise?.premiseNumber !== "60587744") {
+        return { matched: false, event: "NO_MATCH" };
+    }
+    return {
+        matchedCustomer: "1009988776",
+        premiseNumber: "60587744",
+        event: "NEW_OWNER_RECORDED",
+        recordedDate: "2026-06-05",
+        existingServices: ["FPL EVolution Home @ premise 60412233", "Registered EV: Tesla Model Y"]
+    };
+};
+const getServiceConnectionQuoteHandler = async ({ premise_number }) => mockData.service_connection_quote[premise_number] ?? { found: false };
+const startServiceConnectionHandler = async (input) => ({
+    ...mockData.action_responses.start_service_connection,
+    request: input
+});
+const enrollEvChargingHandler = async (input) => ({
+    ...mockData.action_responses.enroll_ev_charging,
+    request: input
+});
+const setMoveIntentHandler = async (input) => ({
+    ...mockData.action_responses.set_move_intent,
+    request: input
+});
 const createFplMcpServer = () => {
     const server = new McpServer({
         name: "fpl-agent-mcp",
@@ -282,47 +355,67 @@ const handleMcpRequest = async (request, response) => {
         });
         return;
     }
-    // Inject Accept header if missing to satisfy StreamableHTTPServerTransport requirements
-    const acceptHeader = request.headers.accept;
-    if (!acceptHeader || (!acceptHeader.includes("application/json") || !acceptHeader.includes("text/event-stream"))) {
-        request.headers.accept = "application/json, text/event-stream";
-    }
-    const server = createFplMcpServer();
-    const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: undefined
-    });
-    // Intercept response to remove taskSupport forbidden
-    const originalWrite = response.write.bind(response);
-    const originalEnd = response.end.bind(response);
-    let responseData = "";
-    response.write = function (chunk, encoding) {
-        if (typeof chunk === "string") {
-            responseData += chunk;
-        }
-        return originalWrite(chunk, encoding);
-    };
-    // @ts-ignore - Override end signature for interception
-    response.end = function (chunk, encoding) {
-        if (chunk) {
-            if (typeof chunk === "string") {
-                responseData += chunk;
+    // Always inject Accept header to satisfy StreamableHTTPServerTransport requirements
+    // @ts-ignore - Modifying headers is allowed in Node.js
+    request.headers.accept = "application/json, text/event-stream";
+    const body = await readRequestBody(request);
+    // Handle initialize
+    if (body?.method === "initialize") {
+        const initResponse = {
+            jsonrpc: "2.0",
+            id: body.id,
+            result: {
+                protocolVersion: "2025-03-26",
+                capabilities: {
+                    tools: { listChanged: true }
+                },
+                serverInfo: {
+                    name: "fpl-agent-mcp",
+                    version: "0.2.0"
+                }
             }
-        }
-        // Remove taskSupport forbidden from tools/list response
-        if (responseData.includes("taskSupport")) {
-            responseData = responseData.replace(/"execution":\{[^}]*\}/g, "");
-        }
-        originalEnd(responseData, encoding);
-        return response;
-    };
-    try {
-        const body = await readRequestBody(request);
-        await server.connect(transport);
-        await transport.handleRequest(request, response, body);
+        };
+        setCorsHeaders(response);
+        response.writeHead(200, { "Content-Type": "text/event-stream" });
+        response.write(`event: message\ndata: ${JSON.stringify(initResponse)}\n\n`);
+        response.end();
+        return;
     }
-    catch (error) {
-        console.error("Error handling MCP request", error);
-        if (!response.headersSent) {
+    // Handle tools/list - manually construct response without execution field
+    if (body?.method === "tools/list") {
+        const server = createFplMcpServer();
+        const transport = new StdioServerTransport();
+        try {
+            // Create a mock stdio transport to get the tools list
+            // We'll use the server's internal method to get tools
+            const tools = [
+                { name: "get_customer_profile", description: "Identify the customer and return linked accounts, premises and registered EVs.", inputSchema: { type: "object", properties: { customer_number: { type: "string" }, phone: { type: "string" }, email: { type: "string" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" }, outputSchema: { type: "object", properties: { found: { type: "boolean" }, customerNumber: { type: "string" }, accounts: { type: "array" }, premises: { type: "array" } } } },
+                { name: "lookup_account", description: "Resolve residential account records by account, customer, phone, email, premise, or address.", inputSchema: { type: "object", properties: { account_number: { type: "string" }, customer_number: { type: "string" }, phone: { type: "string" }, email: { type: "string" }, premise_number: { type: "string" }, address: { type: "string" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" }, outputSchema: { type: "object", properties: { found: { type: "boolean" }, customerNumber: { type: "string" }, accounts: { type: "array" }, premises: { type: "array" } } } },
+                { name: "get_account_summary", description: "Return account status, standing, rate class, smart meter status, enrolled programs and flags.", inputSchema: { type: "object", properties: { account_number: { type: "string" } }, required: ["account_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" }, outputSchema: { type: "object", properties: { accountNumber: { type: "string" }, status: { type: "string" }, standing: { type: "string" }, rateClass: { type: "string" }, smartMeterFlag: { type: "boolean" }, enrolledPrograms: { type: "array" } } } },
+                { name: "get_premise_details", description: "Return premise details by premise number or service address.", inputSchema: { type: "object", properties: { premise_number: { type: "string" }, address: { type: "string" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" }, outputSchema: { type: "object", properties: { premiseNumber: { type: "string" }, address: { type: "object" }, propertyType: { type: "string" }, serviceStatus: { type: "string" }, smartMeterFlag: { type: "boolean" }, evolutionHomeEligible: { type: "boolean" }, evolutionHomeEnrolled: { type: "boolean" } } } },
+                { name: "get_billing_inquiry", description: "Return current bill, due date, charge breakdown, kWh usage and EV off-peak savings.", inputSchema: { type: "object", properties: { account_number: { type: "string" } }, required: ["account_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" }, outputSchema: { type: "object", properties: { accountNumber: { type: "string" }, currentBill: { type: "number" }, dueDate: { type: "string" }, charges: { type: "array" }, kWhUsage: { type: "number" }, evOffPeakSavings: { type: "number" } } } },
+                { name: "get_payment_history", description: "Return recent payment history and AutoPay scheduling details.", inputSchema: { type: "object", properties: { account_number: { type: "string" } }, required: ["account_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" }, outputSchema: { type: "object", properties: { payments: { type: "array" }, autopayEnrolled: { type: "boolean" }, nextScheduledPaymentDate: { type: "string" } } } },
+                { name: "get_usage_history", description: "Return monthly kWh, cost and EV charging kWh trend history.", inputSchema: { type: "object", properties: { account_number: { type: "string" } }, required: ["account_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" }, outputSchema: { type: "array", items: { type: "object", properties: { month: { type: "string" }, kWh: { type: "number" }, cost: { type: "number" }, evChargingKWh: { type: "number" } } } } },
+                { name: "get_ev_enrollment", description: "Return FPL EVolution Home enrollment and charger details for an account.", inputSchema: { type: "object", properties: { account_number: { type: "string" } }, required: ["account_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" }, outputSchema: { type: "object", properties: { enrolled: { type: "boolean" }, chargerDetails: { type: "object" } } } },
+                { name: "check_ev_eligibility", description: "Return premise-specific FPL EVolution Home eligibility checks and recommended install type.", inputSchema: { type: "object", properties: { premise_number: { type: "string" } }, required: ["premise_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" }, outputSchema: { type: "object", properties: { eligible: { type: "boolean" }, recommendedInstallType: { type: "string", enum: ["full", "equipment_only"] }, premiseNumber: { type: "string" } } } },
+                { name: "match_property_to_customer", description: "Match a North Palm Beach property-registration event to the customer.", inputSchema: { type: "object", properties: { address: { type: "string" } }, required: ["address"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" }, outputSchema: { type: "object", properties: { matched: { type: "boolean" }, matchedCustomer: { type: "string" }, premiseNumber: { type: "string" }, event: { type: "string" } } } },
+                { name: "get_service_connection_quote", description: "Return move-in connection quote, deposit status and earliest connection date for a premise.", inputSchema: { type: "object", properties: { premise_number: { type: "string" } }, required: ["premise_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" }, outputSchema: { type: "object", properties: { premiseNumber: { type: "string" }, depositRequired: { type: "boolean" }, depositAmount: { type: "number" }, earliestConnectDate: { type: "string" }, connectionFee: { type: "number" } } } },
+                { name: "start_service_connection", description: "Submit a new residential power connection request.", inputSchema: { type: "object", properties: { premise_number: { type: "string" }, account_number: { type: "string" }, requested_connect_date: { type: "string" } }, required: ["premise_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" }, outputSchema: { type: "object", properties: { success: { type: "boolean" }, request: { type: "object" }, confirmationNumber: { type: "string" } } } },
+                { name: "enroll_ev_charging", description: "Start FPL EVolution Home enrollment for a premise.", inputSchema: { type: "object", properties: { premise_number: { type: "string" }, install_type: { type: "string", enum: ["full", "equipment_only"] } }, required: ["premise_number", "install_type"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" }, outputSchema: { type: "object", properties: { success: { type: "boolean" }, request: { type: "object" }, enrollmentId: { type: "string" } } } },
+                { name: "set_move_intent", description: "Record whether the customer is keeping both homes or moving out of Miami.", inputSchema: { type: "object", properties: { intent: { type: "string", enum: ["keep_both", "move_out_miami"] } }, required: ["intent"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" }, outputSchema: { type: "object", properties: { success: { type: "boolean" }, request: { type: "object" }, recordedIntent: { type: "string" } } } }
+            ];
+            const toolsResponse = {
+                jsonrpc: "2.0",
+                id: body.id,
+                result: { tools }
+            };
+            setCorsHeaders(response);
+            response.writeHead(200, { "Content-Type": "text/event-stream" });
+            response.write(`event: message\ndata: ${JSON.stringify(toolsResponse)}\n\n`);
+            response.end();
+        }
+        catch (error) {
+            console.error("Error handling tools/list", error);
             writeJson(response, 500, {
                 jsonrpc: "2.0",
                 error: {
@@ -332,18 +425,108 @@ const handleMcpRequest = async (request, response) => {
                 id: null
             });
         }
+        finally {
+            await server.close();
+        }
+        return;
     }
-    finally {
-        await transport.close();
-        await server.close();
+    // Handle tools/call - manually handle to bypass transport header requirements
+    if (body?.method === "tools/call") {
+        try {
+            // Directly call the tool handler based on the tool name
+            const toolName = body.params.name;
+            const toolArgs = body.params.arguments || {};
+            if (!toolName) {
+                throw new Error("Missing required field: params.name");
+            }
+            let result;
+            switch (toolName) {
+                case "get_customer_profile":
+                    result = await getCustomerProfileHandler(toolArgs);
+                    break;
+                case "lookup_account":
+                    result = await lookupAccountHandler(toolArgs);
+                    break;
+                case "get_account_summary":
+                    result = await getAccountSummaryHandler(toolArgs);
+                    break;
+                case "get_premise_details":
+                    result = await getPremiseDetailsHandler(toolArgs);
+                    break;
+                case "get_billing_inquiry":
+                    result = await getBillingInquiryHandler(toolArgs);
+                    break;
+                case "get_payment_history":
+                    result = await getPaymentHistoryHandler(toolArgs);
+                    break;
+                case "get_usage_history":
+                    result = await getUsageHistoryHandler(toolArgs);
+                    break;
+                case "get_ev_enrollment":
+                    result = await getEvEnrollmentHandler(toolArgs);
+                    break;
+                case "check_ev_eligibility":
+                    result = await checkEvEligibilityHandler(toolArgs);
+                    break;
+                case "match_property_to_customer":
+                    result = await matchPropertyToCustomerHandler(toolArgs);
+                    break;
+                case "get_service_connection_quote":
+                    result = await getServiceConnectionQuoteHandler(toolArgs);
+                    break;
+                case "start_service_connection":
+                    result = await startServiceConnectionHandler(toolArgs);
+                    break;
+                case "enroll_ev_charging":
+                    result = await enrollEvChargingHandler(toolArgs);
+                    break;
+                case "set_move_intent":
+                    result = await setMoveIntentHandler(toolArgs);
+                    break;
+                default:
+                    throw new Error(`Unknown tool: ${toolName}`);
+            }
+            const callResponse = {
+                jsonrpc: "2.0",
+                id: body.id,
+                result: { content: [{ type: "text", text: JSON.stringify(result) }] }
+            };
+            setCorsHeaders(response);
+            response.writeHead(200, { "Content-Type": "text/event-stream" });
+            response.write(`event: message\ndata: ${JSON.stringify(callResponse)}\n\n`);
+            response.end();
+        }
+        catch (error) {
+            console.error("Error handling tools/call", error);
+            const errorMessage = error instanceof Error ? error.message : "Internal server error";
+            writeJson(response, 500, {
+                jsonrpc: "2.0",
+                error: {
+                    code: -32603,
+                    message: errorMessage
+                },
+                id: null
+            });
+        }
+        return;
     }
+    // Handle all other methods (not initialize, tools/list, tools/call)
+    // For now, return an error for unsupported methods
+    writeJson(response, 400, {
+        jsonrpc: "2.0",
+        error: {
+            code: -32601,
+            message: "Method not found or not supported"
+        },
+        id: body?.id ?? null
+    });
 };
 const startHttpServer = () => {
     const port = Number(process.env.PORT ?? 3000);
     createServer(async (request, response) => {
         const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
         if (url.pathname === "/health") {
-            writeJson(response, 200, { status: "ok", mcpPath: "/mcp", privacyPath: "/privacy" });
+            writeJson(response, 200, { status: "ok", mcpPath: "/mcp", privacyPath: "/privacy", schemaPath: "/gpt/actions-openapi.yaml" });
             return;
         }
         if (url.pathname === "/privacy") {
@@ -354,7 +537,21 @@ const startHttpServer = () => {
             await handleMcpRequest(request, response);
             return;
         }
-        writeJson(response, 404, { error: "Not found", mcpPath: "/mcp", healthPath: "/health", privacyPath: "/privacy" });
+        if (url.pathname === "/gpt/actions-openapi.yaml") {
+            const fs = await import("fs");
+            const path = await import("path");
+            const schemaPath = path.join(process.cwd(), "gpt", "actions-openapi.yaml");
+            try {
+                const schemaContent = fs.readFileSync(schemaPath, "utf-8");
+                response.writeHead(200, { "Content-Type": "text/yaml" });
+                response.end(schemaContent);
+            }
+            catch (error) {
+                writeJson(response, 404, { error: "Schema file not found" });
+            }
+            return;
+        }
+        writeJson(response, 404, { error: "Not found", mcpPath: "/mcp", healthPath: "/health", privacyPath: "/privacy", schemaPath: "/gpt/actions-openapi.yaml" });
     }).listen(port, "0.0.0.0", () => {
         console.log(`FPL MCP HTTP server listening on port ${port}; endpoint: /mcp`);
     });
