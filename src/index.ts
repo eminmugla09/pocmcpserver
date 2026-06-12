@@ -688,7 +688,7 @@ const startHttpServer = () => {
     const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
 
     if (url.pathname === "/health") {
-      writeJson(response, 200, { status: "ok", mcpPath: "/mcp", privacyPath: "/privacy" });
+      writeJson(response, 200, { status: "ok", mcpPath: "/mcp", privacyPath: "/privacy", schemaPath: "/gpt/actions-openapi.yaml" });
       return;
     }
 
@@ -702,7 +702,21 @@ const startHttpServer = () => {
       return;
     }
 
-    writeJson(response, 404, { error: "Not found", mcpPath: "/mcp", healthPath: "/health", privacyPath: "/privacy" });
+    if (url.pathname === "/gpt/actions-openapi.yaml") {
+      const fs = await import("fs");
+      const path = await import("path");
+      const schemaPath = path.join(process.cwd(), "gpt", "actions-openapi.yaml");
+      try {
+        const schemaContent = fs.readFileSync(schemaPath, "utf-8");
+        response.writeHead(200, { "Content-Type": "text/yaml" });
+        response.end(schemaContent);
+      } catch (error) {
+        writeJson(response, 404, { error: "Schema file not found" });
+      }
+      return;
+    }
+
+    writeJson(response, 404, { error: "Not found", mcpPath: "/mcp", healthPath: "/health", privacyPath: "/privacy", schemaPath: "/gpt/actions-openapi.yaml" });
   }).listen(port, "0.0.0.0", () => {
     console.log(`FPL MCP HTTP server listening on port ${port}; endpoint: /mcp`);
   });
