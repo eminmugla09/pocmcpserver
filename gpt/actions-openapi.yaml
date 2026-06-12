@@ -44,7 +44,7 @@ paths:
     post:
       operationId: postMcpJsonRpc
       summary: Call the MCP Streamable HTTP endpoint
-      description: Send JSON-RPC requests to the MCP server. Use `initialize` first, then `tools/list` or `tools/call` with a tool name such as `lookup_account`.
+      description: Send JSON-RPC to MCP. After `initialize`, use `tools/call` for property, account, billing, or EV checks; do not answer from initialize alone.
       requestBody:
         required: true
         content:
