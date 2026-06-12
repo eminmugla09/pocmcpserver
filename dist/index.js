@@ -5,6 +5,23 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { z } from "zod";
 import mockDataJson from "../data/mock_data.json" with { type: "json" };
 const mockData = mockDataJson;
+const getCustomers = () => {
+    if (Array.isArray(mockData.customers) && mockData.customers.length > 0) {
+        return mockData.customers;
+    }
+    return [mockData.customer];
+};
+const normalizeString = (value) => String(value ?? "").trim().toLowerCase();
+const matchesCustomerFilters = (customer, filters) => {
+    const customerNumber = String(customer.customerNumber ?? "");
+    const mobilePhone = String(customer.mobilePhone ?? "");
+    const email = normalizeString(customer.email);
+    const matchesCustomerNumber = !filters.customer_number || filters.customer_number === customerNumber;
+    const matchesPhone = !filters.phone || filters.phone === mobilePhone;
+    const matchesEmail = !filters.email || normalizeString(filters.email) === email;
+    return matchesCustomerNumber && matchesPhone && matchesEmail;
+};
+const findMatchingCustomers = (filters) => getCustomers().filter((customer) => matchesCustomerFilters(customer, filters));
 const jsonContent = (payload) => ({
     content: [
         {
@@ -27,28 +44,37 @@ const findPremiseByAddress = (address) => {
 const findAccounts = (input) => {
     const premise = input.address ? findPremiseByAddress(input.address) : undefined;
     const premiseNumber = input.premise_number ?? premise?.premiseNumber;
-    const matchesPhone = !input.phone || input.phone === mockData.customer.mobilePhone;
-    const matchesEmail = !input.email || input.email.toLowerCase() === String(mockData.customer.email).toLowerCase();
-    const matchesCustomerNumber = !input.customer_number || input.customer_number === mockData.customer.customerNumber;
-    if (!matchesPhone || !matchesEmail || !matchesCustomerNumber) {
+    const matchingCustomers = findMatchingCustomers({
+        customer_number: input.customer_number,
+        phone: input.phone,
+        email: input.email
+    });
+    if (matchingCustomers.length === 0) {
         return [];
     }
+    const matchingCustomerNumbers = new Set(matchingCustomers.map((customer) => String(customer.customerNumber ?? "")).filter(Boolean));
     return Object.values(mockData.accounts).filter((account) => {
         const matchesAccountNumber = !input.account_number || account.accountNumber === input.account_number;
         const matchesPremiseNumber = !premiseNumber || account.premiseNumber === premiseNumber;
-        return matchesAccountNumber && matchesPremiseNumber;
+        const matchesCustomerNumber = !account.customerNumber || matchingCustomerNumbers.has(String(account.customerNumber));
+        return matchesAccountNumber && matchesPremiseNumber && matchesCustomerNumber;
     });
 };
 // Tool handler functions for direct invocation
 const getCustomerProfileHandler = async (args) => {
     const { customer_number, phone, email } = args;
-    const matchesCustomerNumber = !customer_number || customer_number === mockData.customer.customerNumber;
-    const matchesPhone = !phone || phone === mockData.customer.mobilePhone;
-    const matchesEmail = !email || email.toLowerCase() === String(mockData.customer.email).toLowerCase();
-    if (!matchesCustomerNumber || !matchesPhone || !matchesEmail) {
+    const matches = findMatchingCustomers({ customer_number, phone, email });
+    if (matches.length === 0) {
         return { found: false, message: "No matching customer profile found." };
     }
-    return mockData.customer;
+    if (matches.length === 1) {
+        return matches[0];
+    }
+    return {
+        found: true,
+        multipleMatches: true,
+        customers: matches
+    };
 };
 const lookupAccountHandler = async (input) => {
     const accounts = findAccounts(input);
@@ -62,7 +88,7 @@ const lookupAccountHandler = async (input) => {
     }
     return {
         found: true,
-        customerNumber: mockData.customer.customerNumber,
+        customerNumber: String(accounts[0]?.customerNumber ?? ""),
         accounts,
         premises
     };
@@ -131,15 +157,7 @@ const createFplMcpServer = () => {
             phone: z.string().optional(),
             email: z.string().optional()
         }
-    }, async ({ customer_number, phone, email }) => {
-        const matchesCustomerNumber = !customer_number || customer_number === mockData.customer.customerNumber;
-        const matchesPhone = !phone || phone === mockData.customer.mobilePhone;
-        const matchesEmail = !email || email.toLowerCase() === String(mockData.customer.email).toLowerCase();
-        if (!matchesCustomerNumber || !matchesPhone || !matchesEmail) {
-            return jsonContent({ found: false, message: "No matching customer profile found." });
-        }
-        return jsonContent(mockData.customer);
-    });
+    }, async (args) => jsonContent(await getCustomerProfileHandler(args)));
     server.registerTool("lookup_account", {
         description: "Resolve residential account records by account, customer, phone, email, premise, or address.",
         inputSchema: {
@@ -150,23 +168,7 @@ const createFplMcpServer = () => {
             premise_number: z.string().optional(),
             address: z.string().optional()
         }
-    }, async (input) => {
-        const accounts = findAccounts(input);
-        const premiseNumbers = new Set(accounts.map((account) => account.premiseNumber));
-        const premises = [...premiseNumbers].map((premiseNumber) => mockData.premises[premiseNumber]).filter(Boolean);
-        if (accounts.length === 0) {
-            return jsonContent({
-                found: false,
-                message: "No matching account found. Ask the customer for one lookup value: phone number, email address, account number, customer number, premise number, or service address. For voice, ask one question at a time."
-            });
-        }
-        return jsonContent({
-            found: true,
-            customerNumber: mockData.customer.customerNumber,
-            accounts,
-            premises
-        });
-    });
+    }, async (input) => jsonContent(await lookupAccountHandler(input)));
     server.registerTool("get_account_summary", {
         description: "Return account status, standing, rate class, smart meter status, enrolled programs and flags.",
         inputSchema: {

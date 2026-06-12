@@ -28,6 +28,61 @@
     ]
   },
 
+  "customers": [
+    {
+      "customerNumber": "1009988776",
+      "businessPartnerId": "1009988776",
+      "firstName": "Emin",
+      "lastName": "Mugla",
+      "fullName": "Emin Mugla",
+      "email": "woarzus@gmail.com",
+      "mobilePhone": "305-555-0142",
+      "preferredContactMethod": "Mobile",
+      "preferredLanguage": "EN",
+      "customerSince": "2018-03-09",
+      "accountStandingFlag": "GOOD",
+      "linkedAccounts": ["5210099001"],
+      "linkedPremises": ["60412233", "60587744"],
+      "registeredVehicles": [
+        {
+          "vehicleId": "EVREG-7781",
+          "make": "Tesla",
+          "model": "Model Y",
+          "year": 2024,
+          "connectorType": "J1772 (with adapter)",
+          "registeredDate": "2024-08-02",
+          "linkedPremise": "60412233"
+        }
+      ]
+    },
+    {
+      "customerNumber": "1008877665",
+      "businessPartnerId": "1008877665",
+      "firstName": "Ricardo",
+      "lastName": "Vargas",
+      "fullName": "Ricardo Vargas",
+      "email": "ricardo.vargas@gmail.com",
+      "mobilePhone": "786-555-0179",
+      "preferredContactMethod": "Email",
+      "preferredLanguage": "EN",
+      "customerSince": "2021-09-14",
+      "accountStandingFlag": "GOOD",
+      "linkedAccounts": ["5210099222"],
+      "linkedPremises": ["60770011"],
+      "registeredVehicles": [
+        {
+          "vehicleId": "EVREG-9902",
+          "make": "Ford",
+          "model": "Mustang Mach-E",
+          "year": 2023,
+          "connectorType": "J1772",
+          "registeredDate": "2025-11-10",
+          "linkedPremise": "60770011"
+        }
+      ]
+    }
+  ],
+
   "accounts": {
     "5210099001": {
       "accountNumber": "5210099001",
@@ -50,6 +105,29 @@
         "city": "Miami",
         "state": "FL",
         "zip": "33131"
+      }
+    },
+    "5210099222": {
+      "accountNumber": "5210099222",
+      "contractAccountId": "5210099222",
+      "customerNumber": "1008877665",
+      "premiseNumber": "60770011",
+      "accountType": "Residential",
+      "rateClass": "RS-1 Residential Service",
+      "status": "Active",
+      "standing": "Good standing - no past due balance",
+      "pastDueFlag": false,
+      "paymentExtensionFlag": false,
+      "taxExemptFlag": false,
+      "pendingConnectDisconnectFlag": false,
+      "smartMeterFlag": true,
+      "budgetBillingFlag": false,
+      "enrolledPrograms": ["Paperless Billing", "Energy Dashboard"],
+      "serviceAddress": {
+        "line1": "2401 NW 33rd Ave",
+        "city": "Fort Lauderdale",
+        "state": "FL",
+        "zip": "33311"
       }
     }
   },
@@ -89,6 +167,22 @@
       "newOwnerOnRecord": "Emin Mugla (per county property/home registration feed, recorded 2026-06-05)",
       "strongWifiAtChargingLocation": true,
       "existing240vCircuitInGarage": false
+    },
+    "60770011": {
+      "premiseNumber": "60770011",
+      "address": {
+        "line1": "2401 NW 33rd Ave",
+        "city": "Fort Lauderdale",
+        "state": "FL",
+        "zip": "33311"
+      },
+      "propertyType": "Single-family home",
+      "serviceStatus": "Active - Ricardo Vargas",
+      "activeAccountNumber": "5210099222",
+      "smartMeterFlag": true,
+      "meterInstallationNumber": "4100991122",
+      "evolutionHomeEligible": true,
+      "evolutionHomeEnrolled": false
     }
   },
 
@@ -160,6 +254,35 @@
       "autopayEnrolled": true,
       "nextScheduledPaymentDate": "2026-06-18",
       "nextScheduledPaymentAmountUsd": 168.74
+    },
+    "5210099222": {
+      "accountNumber": "5210099222",
+      "currentBill": {
+        "invoiceId": "INV-20260529-8891",
+        "billDate": "2026-05-29",
+        "dueDate": "2026-06-20",
+        "amountDue": 124.37,
+        "billingPeriod": "2026-04-28 to 2026-05-28",
+        "kwhUsed": 842,
+        "averageDailyKwh": 28.1,
+        "averageDailyCostUsd": 4.14,
+        "comparedToLastMonthPct": -2.3,
+        "comparedToLastYearPct": 4.9,
+        "charges": [
+          {"description": "Base charge", "amountUsd": 9.10},
+          {"description": "Non-fuel energy (842 kWh)", "amountUsd": 68.24},
+          {"description": "Fuel charge", "amountUsd": 24.90},
+          {"description": "Taxes & fees", "amountUsd": 22.13}
+        ],
+        "evChargingKwh": 94,
+        "evOffPeakKwh": 80,
+        "evOnPeakKwh": 14,
+        "estimatedEvOffPeakSavingsUsd": 7.95
+      },
+      "paymentStatus": "Current - no balance past due",
+      "autopayEnrolled": false,
+      "nextScheduledPaymentDate": "2026-06-20",
+      "nextScheduledPaymentAmountUsd": 124.37
     }
   },
 
@@ -169,6 +292,12 @@
       {"paymentDate": "2026-04-18", "amountUsd": 174.66, "method": "AutoPay - Bank (ACH)", "confirmation": "PMT-551209", "status": "Posted"},
       {"paymentDate": "2026-03-18", "amountUsd": 188.31, "method": "AutoPay - Bank (ACH)", "confirmation": "PMT-543774", "status": "Posted"},
       {"paymentDate": "2026-02-18", "amountUsd": 201.45, "method": "AutoPay - Bank (ACH)", "confirmation": "PMT-536910", "status": "Posted"}
+    ],
+    "5210099222": [
+      {"paymentDate": "2026-05-22", "amountUsd": 118.41, "method": "Credit Card", "confirmation": "PMT-662731", "status": "Posted"},
+      {"paymentDate": "2026-04-22", "amountUsd": 121.08, "method": "Credit Card", "confirmation": "PMT-655229", "status": "Posted"},
+      {"paymentDate": "2026-03-22", "amountUsd": 126.77, "method": "Credit Card", "confirmation": "PMT-648903", "status": "Posted"},
+      {"paymentDate": "2026-02-22", "amountUsd": 132.54, "method": "Credit Card", "confirmation": "PMT-641772", "status": "Posted"}
     ]
   },
 
@@ -178,6 +307,12 @@
       {"month": "2026-04", "kwh": 1188, "costUsd": 174.66, "evChargingKwh": 301},
       {"month": "2026-03", "kwh": 1264, "costUsd": 188.31, "evChargingKwh": 318},
       {"month": "2026-02", "kwh": 1351, "costUsd": 201.45, "evChargingKwh": 295}
+    ],
+    "5210099222": [
+      {"month": "2026-05", "kwh": 842, "costUsd": 124.37, "evChargingKwh": 94},
+      {"month": "2026-04", "kwh": 861, "costUsd": 121.08, "evChargingKwh": 88},
+      {"month": "2026-03", "kwh": 903, "costUsd": 126.77, "evChargingKwh": 101},
+      {"month": "2026-02", "kwh": 947, "costUsd": 132.54, "evChargingKwh": 110}
     ]
   },
 
