@@ -593,6 +593,10 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
       const toolName = body.params.name;
       const toolArgs = body.params.arguments || {};
       
+      if (!toolName) {
+        throw new Error("Missing required field: params.name");
+      }
+      
       let result;
       switch (toolName) {
         case "get_customer_profile":
@@ -652,11 +656,12 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
       response.end();
     } catch (error) {
       console.error("Error handling tools/call", error);
+      const errorMessage = error instanceof Error ? error.message : "Internal server error";
       writeJson(response, 500, {
         jsonrpc: "2.0",
         error: {
           code: -32603,
-          message: "Internal server error"
+          message: errorMessage
         },
         id: null
       });
