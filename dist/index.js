@@ -293,8 +293,8 @@ const readRequestBody = async (request) => {
 const setCorsHeaders = (response) => {
     response.setHeader("Access-Control-Allow-Origin", "*");
     response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    response.setHeader("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, Mcp-Session-Id, mcp-session-id");
-    response.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id, mcp-session-id");
+    response.setHeader("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, Last-Event-ID, MCP-Protocol-Version, Mcp-Session-Id, last-event-id, mcp-protocol-version, mcp-session-id");
+    response.setHeader("Access-Control-Expose-Headers", "MCP-Protocol-Version, Mcp-Session-Id, mcp-protocol-version, mcp-session-id");
 };
 const writeJson = (response, statusCode, payload) => {
     setCorsHeaders(response);
@@ -356,6 +356,16 @@ const handleMcpRequest = async (request, response) => {
     if (request.method === "OPTIONS") {
         response.writeHead(204);
         response.end();
+        return;
+    }
+    if (request.method === "GET") {
+        writeJson(response, 200, {
+            name: "fpl-agent-mcp",
+            version: "0.2.0",
+            mcpPath: "/mcp",
+            transport: "streamable-http",
+            message: "Send MCP JSON-RPC requests with POST /mcp."
+        });
         return;
     }
     if (request.method !== "POST") {
