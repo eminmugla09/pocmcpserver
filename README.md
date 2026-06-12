@@ -35,13 +35,15 @@ HTTP endpoints:
 Railway sets `PORT` automatically, so the app will start in HTTP mode and expose the MCP endpoint at:
 
 ```text
-https://<your-railway-domain>/mcp
+https://fplpoc.up.railway.app/mcp
 ```
+
+Use that exact URL for the ChatGPT app direct MCP connector. The ChatGPT app does not need the OpenAPI/YAML schema for direct MCP.
 
 Use this privacy policy URL for ChatGPT connector/app setup:
 
 ```text
-https://<your-railway-domain>/privacy
+https://fplpoc.up.railway.app/privacy
 ```
 
 Use these Railway settings:

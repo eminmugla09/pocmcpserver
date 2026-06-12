@@ -436,7 +436,7 @@ const readRequestBody = async (request: IncomingMessage) => {
 const setCorsHeaders = (response: ServerResponse) => {
   response.setHeader("Access-Control-Allow-Origin", "*");
   response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  response.setHeader("Access-Control-Allow-Headers", "Content-Type, Mcp-Session-Id, mcp-session-id");
+  response.setHeader("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, Mcp-Session-Id, mcp-session-id");
   response.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id, mcp-session-id");
 };
 

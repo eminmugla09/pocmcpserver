@@ -40,7 +40,7 @@ paths:
     post:
       operationId: enroll_ev_charging
       summary: Enroll in EV charging
-      description: Mock action that starts FPL EVolution Home enrollment for a premise.
+      description: Starts FPL EVolution Home enrollment for a premise.
       requestBody:
         required: true
         content:
@@ -146,7 +146,7 @@ paths:
     post:
       operationId: get_customer_profile
       summary: Get customer profile
-      description: Identify the synthetic demo customer and return linked accounts, premises and registered EVs.
+      description: Identify the customer and return linked accounts, premises and registered EVs.
       requestBody:
         required: true
         content:
