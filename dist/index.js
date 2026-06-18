@@ -7,9 +7,28 @@ import { z } from "zod";
 import pg from "pg";
 import { verifyToken, getUserCustomerNumbers, hasCustomerAccess } from "./auth.js";
 const { Pool } = pg;
+const getDatabaseUrl = () => {
+    const rawUrl = process.env.DATABASE_URL ?? "";
+    if (!rawUrl) {
+        return rawUrl;
+    }
+    try {
+        const parsed = new URL(rawUrl);
+        const sslMode = parsed.searchParams.get("sslmode");
+        const usesLegacySslMode = sslMode === "prefer" || sslMode === "require" || sslMode === "verify-ca";
+        if (usesLegacySslMode && !parsed.searchParams.has("uselibpqcompat")) {
+            parsed.searchParams.set("uselibpqcompat", "true");
+        }
+        return parsed.toString();
+    }
+    catch {
+        return rawUrl;
+    }
+};
+const databaseUrl = getDatabaseUrl();
 const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: process.env.DATABASE_URL?.includes('neon.tech') ? { rejectUnauthorized: false } : false,
+    connectionString: databaseUrl,
+    ssl: databaseUrl.includes('neon.tech') ? { rejectUnauthorized: false } : false,
     connectionTimeoutMillis: 30000,
 });
 const normalizeString = (value) => String(value ?? "").trim().toLowerCase();

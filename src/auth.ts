@@ -8,10 +8,31 @@ const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{
 
 const isUuid = (value: string): boolean => UUID_V4_REGEX.test(value);
 
+const getDatabaseUrl = () => {
+  const rawUrl = process.env.DATABASE_URL ?? '';
+  if (!rawUrl) {
+    return rawUrl;
+  }
+
+  try {
+    const parsed = new URL(rawUrl);
+    const sslMode = parsed.searchParams.get('sslmode');
+    const usesLegacySslMode = sslMode === 'prefer' || sslMode === 'require' || sslMode === 'verify-ca';
+    if (usesLegacySslMode && !parsed.searchParams.has('uselibpqcompat')) {
+      parsed.searchParams.set('uselibpqcompat', 'true');
+    }
+    return parsed.toString();
+  } catch {
+    return rawUrl;
+  }
+};
+
+const databaseUrl = getDatabaseUrl();
+
 // Database connection
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL?.includes('neon.tech') ? { rejectUnauthorized: false } : false,
+  connectionString: databaseUrl,
+  ssl: databaseUrl.includes('neon.tech') ? { rejectUnauthorized: false } : false,
   connectionTimeoutMillis: 30000
 });
 
