@@ -371,11 +371,37 @@ const ensurePersistenceTables = async () => {
     await pool.query(`
     CREATE TABLE IF NOT EXISTS oauth_codes (
       code TEXT PRIMARY KEY,
+      client_id TEXT NOT NULL,
       user_id TEXT NOT NULL,
       email TEXT NOT NULL,
       redirect_uri TEXT NOT NULL,
+      code_challenge TEXT,
+      code_challenge_method TEXT,
       expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
       used BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS oauth_refresh_tokens (
+      refresh_token TEXT PRIMARY KEY,
+      client_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      email TEXT NOT NULL,
+      expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+      revoked BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS oauth_clients (
+      client_id TEXT PRIMARY KEY,
+      client_secret TEXT,
+      client_name TEXT,
+      redirect_uris JSONB NOT NULL,
+      grant_types JSONB NOT NULL,
+      response_types JSONB NOT NULL,
+      token_endpoint_auth_method TEXT NOT NULL DEFAULT 'none',
       created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );
   `);
@@ -1542,6 +1568,69 @@ const handleMcpRequest = async (request, response) => {
 const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID ?? "chatgpt-fpl-agent";
 const OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET ?? "";
 const JWT_SECRET_VALUE = process.env.JWT_SECRET ?? "change-me";
+const generateRefreshToken = () => `${makeId("RT")}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+const generateClientId = () => `mcp-client-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
+const createOAuthEndpoint = (request, path) => {
+    const host = request.headers.host ?? "localhost";
+    return `https://${host}${path}`;
+};
+const getConfiguredClient = () => ({
+    client_id: OAUTH_CLIENT_ID,
+    client_secret: OAUTH_CLIENT_SECRET || null,
+    client_name: "FPL ChatGPT Connector",
+    redirect_uris: [],
+    grant_types: ["authorization_code", "refresh_token"],
+    response_types: ["code"],
+    token_endpoint_auth_method: OAUTH_CLIENT_SECRET ? "client_secret_post" : "none"
+});
+const getRegisteredOauthClient = async (clientId) => {
+    if (clientId === OAUTH_CLIENT_ID) {
+        return getConfiguredClient();
+    }
+    const result = await pool.query(`SELECT client_id, client_secret, client_name, redirect_uris, grant_types, response_types, token_endpoint_auth_method
+     FROM oauth_clients
+     WHERE client_id = $1`, [clientId]);
+    if (result.rows.length === 0) {
+        return null;
+    }
+    const row = result.rows[0];
+    return {
+        client_id: row.client_id,
+        client_secret: row.client_secret,
+        client_name: row.client_name,
+        redirect_uris: Array.isArray(row.redirect_uris) ? row.redirect_uris : [],
+        grant_types: Array.isArray(row.grant_types) ? row.grant_types : [],
+        response_types: Array.isArray(row.response_types) ? row.response_types : [],
+        token_endpoint_auth_method: row.token_endpoint_auth_method
+    };
+};
+const verifyPkceChallenge = (verifier, challenge, method) => {
+    if (!challenge) {
+        return true;
+    }
+    if ((method ?? "plain") === "plain") {
+        return verifier === challenge;
+    }
+    if (method === "S256") {
+        const hash = Buffer.from(require("node:crypto").createHash("sha256").update(verifier).digest()).toString("base64url");
+        return hash === challenge;
+    }
+    return false;
+};
+const parseRequestBodyFields = (raw, request) => {
+    const contentType = request.headers["content-type"] ?? "";
+    if (contentType.includes("application/x-www-form-urlencoded")) {
+        return new URLSearchParams(Buffer.isBuffer(raw) ? raw.toString() : JSON.stringify(raw));
+    }
+    const fields = new URLSearchParams();
+    const body = (raw || {});
+    for (const [key, value] of Object.entries(body)) {
+        if (typeof value === "string") {
+            fields.set(key, value);
+        }
+    }
+    return fields;
+};
 const oauthLoginPageHtml = (params, error) => `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1582,9 +1671,16 @@ const handleOAuthAuthorize = async (request, response, url) => {
     const redirectUri = url.searchParams.get("redirect_uri") ?? "";
     const state = url.searchParams.get("state") ?? "";
     const responseType = url.searchParams.get("response_type");
+    const codeChallenge = url.searchParams.get("code_challenge");
+    const codeChallengeMethod = url.searchParams.get("code_challenge_method") ?? "plain";
     const params = url.searchParams.toString();
-    if (clientId !== OAUTH_CLIENT_ID || responseType !== "code") {
+    const oauthClient = clientId ? await getRegisteredOauthClient(clientId) : null;
+    if (!oauthClient || responseType !== "code") {
         writeHtml(response, 400, oauthLoginPageHtml(params, "Invalid client or response_type."));
+        return;
+    }
+    if (oauthClient.redirect_uris.length > 0 && !oauthClient.redirect_uris.includes(redirectUri)) {
+        writeHtml(response, 400, oauthLoginPageHtml(params, "Invalid redirect_uri."));
         return;
     }
     if (request.method === "GET") {
@@ -1621,8 +1717,8 @@ const handleOAuthAuthorize = async (request, response, url) => {
     // Issue authorization code (10 min TTL)
     const code = makeId("CODE") + "-" + Math.random().toString(36).slice(2);
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-    await pool.query(`INSERT INTO oauth_codes (code, user_id, email, redirect_uri, expires_at)
-     VALUES ($1, $2, $3, $4, $5)`, [code, user.id, user.email, redirectUri, expiresAt]);
+    await pool.query(`INSERT INTO oauth_codes (code, client_id, user_id, email, redirect_uri, code_challenge, code_challenge_method, expires_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, [code, oauthClient.client_id, user.id, user.email, redirectUri, codeChallenge, codeChallengeMethod, expiresAt]);
     const redirectUrl = new URL(redirectUri);
     redirectUrl.searchParams.set("code", code);
     if (state)
@@ -1639,26 +1735,206 @@ const handleOAuthToken = async (request, response) => {
         return;
     }
     const raw = await readRequestBody(request);
-    let grantType, code, redirectUri, clientId, clientSecret;
-    // Support both JSON and form-urlencoded bodies
+    const bodyFields = parseRequestBodyFields(raw, request);
+    const grantType = bodyFields.get("grant_type") ?? "";
+    const code = bodyFields.get("code") ?? "";
+    const redirectUri = bodyFields.get("redirect_uri") ?? "";
+    let clientId = bodyFields.get("client_id") ?? "";
+    let clientSecret = bodyFields.get("client_secret") ?? "";
+    const codeVerifier = bodyFields.get("code_verifier") ?? "";
+    const refreshTokenGrant = bodyFields.get("refresh_token") ?? "";
+    // Also check Authorization header for client credentials
+    const authHeader = request.headers.authorization ?? "";
+    if (authHeader.startsWith("Basic ")) {
+        const decoded = Buffer.from(authHeader.slice(6), "base64").toString();
+        const [hId, hSecret] = decoded.split(":");
+        if (!clientId)
+            clientId = hId;
+        if (!clientSecret)
+            clientSecret = hSecret;
+    }
+    const oauthClient = clientId ? await getRegisteredOauthClient(clientId) : null;
+    if (!oauthClient) {
+        writeJson(response, 401, { error: "invalid_client" });
+        return;
+    }
+    if (oauthClient.token_endpoint_auth_method === "client_secret_post" || oauthClient.token_endpoint_auth_method === "client_secret_basic") {
+        if (!oauthClient.client_secret || clientSecret !== oauthClient.client_secret) {
+            writeJson(response, 401, { error: "invalid_client" });
+            return;
+        }
+    }
+    if (grantType === "refresh_token") {
+        const tokenResult = await pool.query(`SELECT user_id, email, expires_at, revoked, client_id
+       FROM oauth_refresh_tokens
+       WHERE refresh_token = $1`, [refreshTokenGrant]);
+        if (tokenResult.rows.length === 0) {
+            writeJson(response, 400, { error: "invalid_grant", error_description: "Refresh token not found." });
+            return;
+        }
+        const refreshRow = tokenResult.rows[0];
+        if (refreshRow.client_id !== oauthClient.client_id) {
+            writeJson(response, 400, { error: "invalid_grant", error_description: "Refresh token client mismatch." });
+            return;
+        }
+        if (refreshRow.revoked) {
+            writeJson(response, 400, { error: "invalid_grant", error_description: "Refresh token revoked." });
+            return;
+        }
+        if (new Date(refreshRow.expires_at) < new Date()) {
+            writeJson(response, 400, { error: "invalid_grant", error_description: "Refresh token expired." });
+            return;
+        }
+        const jwt = await import("jsonwebtoken");
+        const refreshedAccessToken = jwt.default.sign({ userId: refreshRow.user_id, email: refreshRow.email }, JWT_SECRET_VALUE, { expiresIn: "1y" });
+        writeJson(response, 200, {
+            access_token: refreshedAccessToken,
+            token_type: "Bearer",
+            expires_in: 31536000,
+            refresh_token: refreshTokenGrant
+        });
+        return;
+    }
+    if (grantType !== "authorization_code") {
+        writeJson(response, 400, { error: "unsupported_grant_type" });
+        return;
+    }
+    const codeResult = await pool.query(`SELECT client_id, user_id, email, redirect_uri, code_challenge, code_challenge_method, expires_at, used
+     FROM oauth_codes WHERE code = $1`, [code]);
+    if (codeResult.rows.length === 0) {
+        writeJson(response, 400, { error: "invalid_grant", error_description: "Code not found." });
+        return;
+    }
+    const row = codeResult.rows[0];
+    if (row.client_id !== oauthClient.client_id) {
+        writeJson(response, 400, { error: "invalid_grant", error_description: "Authorization code client mismatch." });
+        return;
+    }
+    if (row.used) {
+        writeJson(response, 400, { error: "invalid_grant", error_description: "Code already used." });
+        return;
+    }
+    if (new Date(row.expires_at) < new Date()) {
+        writeJson(response, 400, { error: "invalid_grant", error_description: "Code expired." });
+        return;
+    }
+    if (row.redirect_uri !== redirectUri) {
+        writeJson(response, 400, { error: "invalid_grant", error_description: "redirect_uri mismatch." });
+        return;
+    }
+    if (row.code_challenge && !verifyPkceChallenge(codeVerifier, row.code_challenge, row.code_challenge_method)) {
+        writeJson(response, 400, { error: "invalid_grant", error_description: "PKCE verification failed." });
+        return;
+    }
+    // Mark code used
+    await pool.query("UPDATE oauth_codes SET used = TRUE WHERE code = $1", [code]);
+    // Issue access token (1 year JWT so ChatGPT stays connected)
+    const jwt = await import("jsonwebtoken");
+    const accessToken = jwt.default.sign({ userId: row.user_id, email: row.email }, JWT_SECRET_VALUE, { expiresIn: "1y" });
+    const refreshToken = generateRefreshToken();
+    const refreshExpiresAt = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
+    await pool.query(`INSERT INTO oauth_refresh_tokens (refresh_token, client_id, user_id, email, expires_at)
+     VALUES ($1, $2, $3, $4, $5)`, [refreshToken, oauthClient.client_id, row.user_id, row.email, refreshExpiresAt]);
+    writeJson(response, 200, {
+        access_token: accessToken,
+        token_type: "Bearer",
+        expires_in: 31536000,
+        refresh_token: refreshToken
+    });
+};
+const handleOAuthRegister = async (request, response) => {
+    setCorsHeaders(response);
+    if (request.method === "OPTIONS") {
+        response.writeHead(204);
+        response.end();
+        return;
+    }
+    if (request.method !== "POST") {
+        writeJson(response, 405, { error: "method_not_allowed" });
+        return;
+    }
+    const raw = await readRequestBody(request);
+    const body = (raw || {});
+    const redirectUris = Array.isArray(body.redirect_uris)
+        ? body.redirect_uris.filter((value) => typeof value === "string")
+        : [];
+    if (redirectUris.length === 0) {
+        writeJson(response, 400, { error: "invalid_client_metadata", error_description: "redirect_uris is required." });
+        return;
+    }
+    const tokenEndpointAuthMethod = typeof body.token_endpoint_auth_method === "string"
+        ? body.token_endpoint_auth_method
+        : "none";
+    const clientId = generateClientId();
+    const clientSecret = tokenEndpointAuthMethod === "none"
+        ? null
+        : generateRefreshToken();
+    const clientName = typeof body.client_name === "string" ? body.client_name : "MCP Client";
+    const grantTypes = Array.isArray(body.grant_types)
+        ? body.grant_types.filter((value) => typeof value === "string")
+        : ["authorization_code", "refresh_token"];
+    const responseTypes = Array.isArray(body.response_types)
+        ? body.response_types.filter((value) => typeof value === "string")
+        : ["code"];
+    await pool.query(`INSERT INTO oauth_clients
+      (client_id, client_secret, client_name, redirect_uris, grant_types, response_types, token_endpoint_auth_method)
+     VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7)`, [
+        clientId,
+        clientSecret,
+        clientName,
+        JSON.stringify(redirectUris),
+        JSON.stringify(grantTypes),
+        JSON.stringify(responseTypes),
+        tokenEndpointAuthMethod
+    ]);
+    writeJson(response, 201, {
+        client_id: clientId,
+        client_secret: clientSecret,
+        client_id_issued_at: Math.floor(Date.now() / 1000),
+        client_secret_expires_at: 0,
+        redirect_uris: redirectUris,
+        grant_types: grantTypes,
+        response_types: responseTypes,
+        token_endpoint_auth_method: tokenEndpointAuthMethod,
+        client_name: clientName
+    });
+};
+const handleOAuthMetadata = async (request, response) => {
+    writeJson(response, 200, {
+        issuer: createOAuthEndpoint(request, ""),
+        authorization_endpoint: createOAuthEndpoint(request, "/oauth/authorize"),
+        token_endpoint: createOAuthEndpoint(request, "/oauth/token"),
+        registration_endpoint: createOAuthEndpoint(request, "/register"),
+        response_types_supported: ["code"],
+        grant_types_supported: ["authorization_code", "refresh_token"],
+        code_challenge_methods_supported: ["S256", "plain"],
+        token_endpoint_auth_methods_supported: ["none", "client_secret_post", "client_secret_basic"]
+    });
+};
+const handleOAuthRefresh = async (request, response) => {
+    setCorsHeaders(response);
+    if (request.method === "OPTIONS") {
+        response.writeHead(204);
+        response.end();
+        return;
+    }
+    const raw = await readRequestBody(request);
+    let refreshToken = "";
+    let clientId = "";
+    let clientSecret = "";
     const contentType = request.headers["content-type"] ?? "";
     if (contentType.includes("application/x-www-form-urlencoded")) {
         const p = new URLSearchParams(Buffer.isBuffer(raw) ? raw.toString() : JSON.stringify(raw));
-        grantType = p.get("grant_type") ?? "";
-        code = p.get("code") ?? "";
-        redirectUri = p.get("redirect_uri") ?? "";
+        refreshToken = p.get("refresh_token") ?? "";
         clientId = p.get("client_id") ?? "";
         clientSecret = p.get("client_secret") ?? "";
     }
     else {
-        const b = raw;
-        grantType = b.grant_type ?? "";
-        code = b.code ?? "";
-        redirectUri = b.redirect_uri ?? "";
+        const b = (raw || {});
+        refreshToken = b.refresh_token ?? "";
         clientId = b.client_id ?? "";
         clientSecret = b.client_secret ?? "";
     }
-    // Also check Authorization header for client credentials
     const authHeader = request.headers.authorization ?? "";
     if (authHeader.startsWith("Basic ")) {
         const decoded = Buffer.from(authHeader.slice(6), "base64").toString();
@@ -1672,38 +1948,33 @@ const handleOAuthToken = async (request, response) => {
         writeJson(response, 401, { error: "invalid_client" });
         return;
     }
-    if (grantType !== "authorization_code") {
-        writeJson(response, 400, { error: "unsupported_grant_type" });
+    if (!refreshToken) {
+        writeJson(response, 400, { error: "invalid_request", error_description: "refresh_token is required." });
         return;
     }
-    const codeResult = await pool.query(`SELECT user_id, email, redirect_uri, expires_at, used
-     FROM oauth_codes WHERE code = $1`, [code]);
-    if (codeResult.rows.length === 0) {
-        writeJson(response, 400, { error: "invalid_grant", error_description: "Code not found." });
+    const tokenResult = await pool.query(`SELECT user_id, email, expires_at, revoked
+     FROM oauth_refresh_tokens
+     WHERE refresh_token = $1`, [refreshToken]);
+    if (tokenResult.rows.length === 0) {
+        writeJson(response, 400, { error: "invalid_grant", error_description: "Refresh token not found." });
         return;
     }
-    const row = codeResult.rows[0];
-    if (row.used) {
-        writeJson(response, 400, { error: "invalid_grant", error_description: "Code already used." });
+    const row = tokenResult.rows[0];
+    if (row.revoked) {
+        writeJson(response, 400, { error: "invalid_grant", error_description: "Refresh token revoked." });
         return;
     }
     if (new Date(row.expires_at) < new Date()) {
-        writeJson(response, 400, { error: "invalid_grant", error_description: "Code expired." });
+        writeJson(response, 400, { error: "invalid_grant", error_description: "Refresh token expired." });
         return;
     }
-    if (row.redirect_uri !== redirectUri) {
-        writeJson(response, 400, { error: "invalid_grant", error_description: "redirect_uri mismatch." });
-        return;
-    }
-    // Mark code used
-    await pool.query("UPDATE oauth_codes SET used = TRUE WHERE code = $1", [code]);
-    // Issue access token (1 year JWT so ChatGPT stays connected)
     const jwt = await import("jsonwebtoken");
     const accessToken = jwt.default.sign({ userId: row.user_id, email: row.email }, JWT_SECRET_VALUE, { expiresIn: "1y" });
     writeJson(response, 200, {
         access_token: accessToken,
         token_type: "Bearer",
-        expires_in: 31536000
+        expires_in: 31536000,
+        refresh_token: refreshToken
     });
 };
 const startHttpServer = () => {
@@ -1718,12 +1989,24 @@ const startHttpServer = () => {
             writeHtml(response, 200, privacyPageHtml);
             return;
         }
-        if (url.pathname === "/oauth/authorize") {
+        if (url.pathname === "/.well-known/oauth-authorization-server") {
+            await handleOAuthMetadata(request, response);
+            return;
+        }
+        if (url.pathname === "/oauth/authorize" || url.pathname === "/authorize") {
             await handleOAuthAuthorize(request, response, url);
             return;
         }
-        if (url.pathname === "/oauth/token") {
+        if (url.pathname === "/oauth/token" || url.pathname === "/token") {
             await handleOAuthToken(request, response);
+            return;
+        }
+        if (url.pathname === "/oauth/refresh" || url.pathname === "/refresh") {
+            await handleOAuthRefresh(request, response);
+            return;
+        }
+        if (url.pathname === "/register") {
+            await handleOAuthRegister(request, response);
             return;
         }
         if (url.pathname === "/mcp") {
