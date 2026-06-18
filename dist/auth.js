@@ -3,6 +3,8 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 const SALT_ROUNDS = 10;
+const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const isUuid = (value) => UUID_V4_REGEX.test(value);
 // Database connection
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
@@ -155,6 +157,9 @@ export async function changePassword(userId, currentPassword, newPassword) {
 }
 // Get customer numbers accessible to a user
 export async function getUserCustomerNumbers(userId) {
+    if (!isUuid(userId)) {
+        return [];
+    }
     try {
         const result = await pool.query('SELECT customer_number FROM user_customers WHERE user_id = $1', [userId]);
         return result.rows.map(row => row.customer_number);
@@ -166,6 +171,9 @@ export async function getUserCustomerNumbers(userId) {
 }
 // Check if user has access to a specific customer
 export async function hasCustomerAccess(userId, customerNumber) {
+    if (!isUuid(userId)) {
+        return false;
+    }
     try {
         const result = await pool.query('SELECT 1 FROM user_customers WHERE user_id = $1 AND customer_number = $2', [userId, customerNumber]);
         return result.rows.length > 0;
