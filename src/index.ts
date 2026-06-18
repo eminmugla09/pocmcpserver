@@ -1889,6 +1889,35 @@ const writeHtml = (response: ServerResponse, statusCode: number, html: string) =
   response.end(html);
 };
 
+const toSingleHeaderValue = (value: string | string[] | undefined) => {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value[0] ?? "";
+  }
+  return "";
+};
+
+const logEvent = (level: "info" | "warn" | "error", event: string, details: Record<string, unknown>) => {
+  const entry = {
+    ts: new Date().toISOString(),
+    level,
+    event,
+    ...details
+  };
+  const line = JSON.stringify(entry);
+  if (level === "error") {
+    console.error(line);
+    return;
+  }
+  if (level === "warn") {
+    console.warn(line);
+    return;
+  }
+  console.log(line);
+};
+
 const ACCOUNT_SCOPED_TOOLS = new Set([
   "get_account_summary",
   "get_billing_inquiry",
@@ -1977,6 +2006,8 @@ const privacyPageHtml = `<!doctype html>
 const handleMcpRequest = async (request: IncomingMessage, response: ServerResponse) => {
   setCorsHeaders(response);
 
+  const requestId = toSingleHeaderValue(request.headers["x-request-id"]) || makeId("REQ");
+
   if (request.method === "OPTIONS") {
     response.writeHead(204);
     response.end();
@@ -2002,11 +2033,37 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
   }
 
   const body = await readRequestBody(request);
+  const mcpMethod = typeof body?.method === "string" ? body.method : "unknown";
+  const mcpToolName = mcpMethod === "tools/call" && typeof body?.params?.name === "string"
+    ? body.params.name
+    : null;
+  const mcpSessionId = toSingleHeaderValue(request.headers["mcp-session-id"]);
+
+  logEvent("info", "mcp.request.received", {
+    requestId,
+    mcpMethod,
+    mcpToolName,
+    mcpSessionId,
+    hasAuthHeader: Boolean(request.headers.authorization)
+  });
+
+  const logMcpError = (statusCode: number, code: number, message: string) => {
+    logEvent("warn", "mcp.request.error", {
+      requestId,
+      statusCode,
+      mcpMethod,
+      mcpToolName,
+      mcpSessionId,
+      code,
+      message
+    });
+  };
 
   // Verify JWT token for tool calls (except initialize and tools/list)
   if (body?.method === "tools/call" && body.params?.name) {
     const authHeader = request.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      logMcpError(401, -32001, "Authentication required. Provide a valid JWT token in the Authorization header.");
       writeJson(response, 401, {
         jsonrpc: "2.0",
         error: {
@@ -2022,6 +2079,7 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
     try {
       const decoded = verifyToken(token);
       if (!decoded.userId) {
+        logMcpError(401, -32001, "Invalid token format.");
         writeJson(response, 401, {
           jsonrpc: "2.0",
           error: {
@@ -2065,6 +2123,7 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
       if (toolArguments.customer_number) {
         const customerNumber = toolArguments.customer_number;
         if (shouldEnforceCustomerAccess && typeof customerNumber === 'string' && !await hasCustomerAccess(decoded.userId, customerNumber)) {
+          logMcpError(403, -32002, "Access denied. You don't have permission to access this customer's data.");
           writeJson(response, 403, {
             jsonrpc: "2.0",
             error: {
@@ -2084,6 +2143,7 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
         );
         const accountCustomerNumber = accountResult.rows[0]?.customer_number;
         if (accountCustomerNumber && !userCustomerNumbers.includes(accountCustomerNumber)) {
+          logMcpError(403, -32002, "Access denied. You don't have permission to access this account's data.");
           writeJson(response, 403, {
             jsonrpc: "2.0",
             error: {
@@ -2096,6 +2156,7 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
         }
       }
     } catch (error) {
+      logMcpError(401, -32001, "Invalid or expired token.");
       writeJson(response, 401, {
         jsonrpc: "2.0",
         error: {
@@ -2199,7 +2260,12 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
       response.write(`event: message\ndata: ${JSON.stringify(toolsResponse)}\n\n`);
       response.end();
     } catch (error) {
-      console.error("Error handling tools/list", error);
+        logEvent("error", "mcp.tools_list.error", {
+          requestId,
+          mcpMethod,
+          mcpSessionId,
+          error: error instanceof Error ? error.message : String(error)
+        });
       writeJson(response, 500, {
         jsonrpc: "2.0",
         error: {
@@ -2224,7 +2290,13 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
     await server.connect(transport);
     await transport.handleRequest(request, response, body);
   } catch (error) {
-    console.error("Error handling MCP request", error);
+    logEvent("error", "mcp.request.handler_error", {
+      requestId,
+      mcpMethod,
+      mcpToolName,
+      mcpSessionId,
+      error: error instanceof Error ? error.message : String(error)
+    });
 
     if (!response.headersSent) {
       writeJson(response, 500, {
@@ -2769,8 +2841,25 @@ const startHttpServer = () => {
   const port = Number(process.env.PORT ?? 3000);
 
   createServer(async (request, response) => {
+    const startedAt = Date.now();
+    const requestId = toSingleHeaderValue(request.headers["x-request-id"]) || makeId("REQ");
+    request.headers["x-request-id"] = requestId;
+    response.setHeader("X-Request-Id", requestId);
+    let pathname = request.url ?? "/";
+
+    response.on("finish", () => {
+      logEvent("info", "http.request.complete", {
+        requestId,
+        method: request.method ?? "UNKNOWN",
+        path: pathname,
+        statusCode: response.statusCode,
+        durationMs: Date.now() - startedAt
+      });
+    });
+
     try {
       const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+      pathname = url.pathname;
 
       if (url.pathname === "/health") {
         writeJson(response, 200, { status: "ok", mcpPath: "/mcp", privacyPath: "/privacy" });
@@ -2823,7 +2912,12 @@ const startHttpServer = () => {
 
       writeJson(response, 404, { error: "Not found", mcpPath: "/mcp", healthPath: "/health", privacyPath: "/privacy" });
     } catch (error) {
-      console.error("HTTP route handling error", error);
+      logEvent("error", "http.route.error", {
+        requestId,
+        method: request.method ?? "UNKNOWN",
+        path: pathname,
+        error: error instanceof Error ? error.message : String(error)
+      });
       if (!response.headersSent) {
         writeJson(response, 500, { error: "Internal server error" });
       }
