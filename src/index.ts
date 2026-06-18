@@ -3,33 +3,24 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
-import mockDataJson from "../data/mock_data.json" with { type: "json" };
+import pg from "pg";
 
-type MockData = {
-  customer: Record<string, unknown>;
-  customers?: Array<Record<string, unknown>>;
-  accounts: Record<string, Record<string, unknown>>;
-  premises: Record<string, Record<string, unknown>>;
-  ev_enrollments: Record<string, Record<string, unknown>>;
-  ev_eligibility: Record<string, Record<string, unknown>>;
-  billing: Record<string, { currentBill: Record<string, unknown>; autopayEnrolled?: boolean; nextScheduledPaymentDate?: string }>;
-  payment_history: Record<string, Array<Record<string, unknown>>>;
-  usage_history: Record<string, Array<Record<string, unknown>>>;
-  service_connection_quote: Record<string, Record<string, unknown>>;
-  action_responses: Record<string, Record<string, unknown> | string>;
-};
+const { Pool } = pg;
 
-const mockData = mockDataJson as MockData;
-
-const getCustomers = () => {
-  if (Array.isArray(mockData.customers) && mockData.customers.length > 0) {
-    return mockData.customers;
-  }
-
-  return [mockData.customer];
-};
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL?.includes('neon.tech') ? { rejectUnauthorized: false } : false,
+  connectionTimeoutMillis: 30000,
+});
 
 const normalizeString = (value: unknown) => String(value ?? "").trim().toLowerCase();
+
+const getCustomers = async () => {
+  const result = await pool.query(
+    'SELECT customer_number, business_partner_id, first_name, last_name, full_name, email, mobile_phone, preferred_contact_method, preferred_language, customer_since, account_standing_flag FROM customers'
+  );
+  return result.rows;
+};
 
 const matchesCustomerFilters = (
   customer: Record<string, unknown>,
@@ -46,8 +37,10 @@ const matchesCustomerFilters = (
   return matchesCustomerNumber && matchesPhone && matchesEmail;
 };
 
-const findMatchingCustomers = (filters: { customer_number?: string; phone?: string; email?: string }) =>
-  getCustomers().filter((customer) => matchesCustomerFilters(customer, filters));
+const findMatchingCustomers = async (filters: { customer_number?: string; phone?: string; email?: string }) => {
+  const customers = await getCustomers();
+  return customers.filter((customer: any) => matchesCustomerFilters(customer, filters));
+};
 
 const jsonContent = (payload: unknown) => ({
   content: [
@@ -58,21 +51,17 @@ const jsonContent = (payload: unknown) => ({
   ]
 });
 
-const findPremiseByAddress = (address: string) => {
+const findPremiseByAddress = async (address: string) => {
   const normalizedAddress = address.toLowerCase();
-
-  return Object.values(mockData.premises).find((premise) => {
-    const premiseAddress = premise.address as { line1?: string; city?: string; state?: string; zip?: string } | undefined;
-    const fullAddress = [premiseAddress?.line1, premiseAddress?.city, premiseAddress?.state, premiseAddress?.zip]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
-
-    return fullAddress.includes(normalizedAddress) || normalizedAddress.includes(premiseAddress?.line1?.toLowerCase() ?? "");
-  });
+  const result = await pool.query(
+    `SELECT * FROM premises WHERE 
+     LOWER(address_line1 || ' ' || address_city || ' ' || address_state || ' ' || address_zip) LIKE $1`,
+    [`%${normalizedAddress}%`]
+  );
+  return result.rows[0] || null;
 };
 
-const findAccounts = (input: {
+const findAccounts = async (input: {
   account_number?: string;
   customer_number?: string;
   phone?: string;
@@ -80,9 +69,14 @@ const findAccounts = (input: {
   premise_number?: string;
   address?: string;
 }) => {
-  const premise = input.address ? findPremiseByAddress(input.address) : undefined;
-  const premiseNumber = input.premise_number ?? (premise?.premiseNumber as string | undefined);
-  const matchingCustomers = findMatchingCustomers({
+  let premiseNumber = input.premise_number;
+  
+  if (input.address) {
+    const premise = await findPremiseByAddress(input.address);
+    premiseNumber = premise?.premise_number || input.premise_number;
+  }
+  
+  const matchingCustomers = await findMatchingCustomers({
     customer_number: input.customer_number,
     phone: input.phone,
     email: input.email
@@ -93,22 +87,30 @@ const findAccounts = (input: {
   }
 
   const matchingCustomerNumbers = new Set(
-    matchingCustomers.map((customer) => String(customer.customerNumber ?? "")).filter(Boolean)
+    matchingCustomers.map((customer: any) => customer.customer_number).filter(Boolean)
   );
 
-  return Object.values(mockData.accounts).filter((account) => {
-    const matchesAccountNumber = !input.account_number || account.accountNumber === input.account_number;
-    const matchesPremiseNumber = !premiseNumber || account.premiseNumber === premiseNumber;
-    const matchesCustomerNumber = !account.customerNumber || matchingCustomerNumbers.has(String(account.customerNumber));
-
-    return matchesAccountNumber && matchesPremiseNumber && matchesCustomerNumber;
-  });
+  const query = `
+    SELECT * FROM accounts 
+    WHERE ($1::text = '' OR account_number = $1)
+    AND ($2::text = '' OR customer_number = ANY($3::text[]))
+    AND ($4::text = '' OR premise_number = $4)
+  `;
+  
+  const result = await pool.query(query, [
+    input.account_number || '',
+    '',
+    Array.from(matchingCustomerNumbers),
+    premiseNumber || ''
+  ]);
+  
+  return result.rows;
 };
 
 // Tool handler functions for direct invocation
 const getCustomerProfileHandler = async (args: any) => {
   const { customer_number, phone, email } = args;
-  const matches = findMatchingCustomers({ customer_number, phone, email });
+  const matches = await findMatchingCustomers({ customer_number, phone, email });
 
   if (matches.length === 0) {
     return { found: false, message: "No matching customer profile found." };
@@ -126,9 +128,15 @@ const getCustomerProfileHandler = async (args: any) => {
 };
 
 const lookupAccountHandler = async (input: any) => {
-  const accounts = findAccounts(input);
-  const premiseNumbers = new Set(accounts.map((account) => account.premiseNumber as string));
-  const premises = [...premiseNumbers].map((premiseNumber) => mockData.premises[premiseNumber]).filter(Boolean);
+  const accounts = await findAccounts(input);
+  const premiseNumbers = new Set(accounts.map((account: any) => account.premise_number).filter(Boolean));
+  
+  let premises = [];
+  if (premiseNumbers.size > 0) {
+    const premiseQuery = 'SELECT * FROM premises WHERE premise_number = ANY($1::text[])';
+    const premiseResult = await pool.query(premiseQuery, [Array.from(premiseNumbers)]);
+    premises = premiseResult.rows;
+  }
 
   if (accounts.length === 0) {
     return {
@@ -139,49 +147,110 @@ const lookupAccountHandler = async (input: any) => {
 
   return {
     found: true,
-    customerNumber: String(accounts[0]?.customerNumber ?? ""),
+    customerNumber: String(accounts[0]?.customer_number ?? ""),
     accounts,
     premises
   };
 };
 
-const getAccountSummaryHandler = async ({ account_number }: any) => 
-  mockData.accounts[account_number] ?? { found: false };
-
-const getPremiseDetailsHandler = async ({ premise_number, address }: any) => {
-  let premise: Record<string, unknown> | undefined;
-
-  if (premise_number) {
-    premise = mockData.premises[premise_number];
-  } else if (address) {
-    premise = findPremiseByAddress(address);
-  }
-
-  return premise ?? { found: false };
+const getAccountSummaryHandler = async ({ account_number }: any) => {
+  const result = await pool.query('SELECT * FROM accounts WHERE account_number = $1', [account_number]);
+  return result.rows[0] || { found: false };
 };
 
-const getBillingInquiryHandler = async ({ account_number }: any) => 
-  mockData.billing[account_number]?.currentBill ?? { found: false };
+const getPremiseDetailsHandler = async ({ premise_number, address }: any) => {
+  let premise: any = null;
 
-const getPaymentHistoryHandler = async ({ account_number }: any) => ({
-  payments: mockData.payment_history[account_number] ?? [],
-  autopayEnrolled: mockData.billing[account_number]?.autopayEnrolled ?? false,
-  nextScheduledPaymentDate: mockData.billing[account_number]?.nextScheduledPaymentDate
-});
+  if (premise_number) {
+    const result = await pool.query('SELECT * FROM premises WHERE premise_number = $1', [premise_number]);
+    premise = result.rows[0];
+  } else if (address) {
+    premise = await findPremiseByAddress(address);
+  }
 
-const getUsageHistoryHandler = async ({ account_number }: any) => 
-  mockData.usage_history[account_number] ?? [];
+  return premise || { found: false };
+};
 
-const getEvEnrollmentHandler = async ({ account_number }: any) => 
-  mockData.ev_enrollments[account_number] ?? { enrolled: false };
+const getBillingInquiryHandler = async ({ account_number }: any) => {
+  const result = await pool.query(
+    'SELECT * FROM billing WHERE account_number = $1 ORDER BY bill_date DESC LIMIT 1',
+    [account_number]
+  );
+  const billing = result.rows[0];
+  if (!billing) return { found: false };
+  
+  // Get charges for this bill
+  const chargesResult = await pool.query(
+    'SELECT * FROM bill_charges WHERE billing_id = $1',
+    [billing.id]
+  );
+  
+  return {
+    invoiceId: billing.invoice_id,
+    billDate: billing.bill_date,
+    dueDate: billing.due_date,
+    amountDue: billing.amount_due,
+    billingPeriod: `${billing.billing_period_start} to ${billing.billing_period_end}`,
+    kwhUsed: billing.kwh_used,
+    averageDailyKwh: billing.average_daily_kwh,
+    averageDailyCostUsd: billing.average_daily_cost_usd,
+    comparedToLastMonthPct: billing.compared_to_last_month_pct,
+    comparedToLastYearPct: billing.compared_to_last_year_pct,
+    charges: chargesResult.rows,
+    evChargingKwh: billing.ev_charging_kwh,
+    evOffPeakKwh: billing.ev_off_peak_kwh,
+    evOnPeakKwh: billing.ev_on_peak_kwh,
+    estimatedEvOffPeakSavingsUsd: billing.estimated_ev_off_peak_savings_usd
+  };
+};
 
-const checkEvEligibilityHandler = async ({ premise_number }: any) => 
-  mockData.ev_eligibility[premise_number] ?? { eligible: false, found: false };
+const getPaymentHistoryHandler = async ({ account_number }: any) => {
+  const paymentsResult = await pool.query(
+    'SELECT * FROM payment_history WHERE account_number = $1 ORDER BY payment_date DESC',
+    [account_number]
+  );
+  const billingResult = await pool.query(
+    'SELECT autopay_enrolled, next_scheduled_payment_date, next_scheduled_payment_amount_usd FROM billing WHERE account_number = $1',
+    [account_number]
+  );
+  const billing = billingResult.rows[0];
+  
+  return {
+    payments: paymentsResult.rows,
+    autopayEnrolled: billing?.autopay_enrolled || false,
+    nextScheduledPaymentDate: billing?.next_scheduled_payment_date,
+    nextScheduledPaymentAmountUsd: billing?.next_scheduled_payment_amount_usd
+  };
+};
+
+const getUsageHistoryHandler = async ({ account_number }: any) => {
+  const result = await pool.query(
+    'SELECT * FROM usage_history WHERE account_number = $1 ORDER BY month DESC',
+    [account_number]
+  );
+  return result.rows;
+};
+
+const getEvEnrollmentHandler = async ({ account_number }: any) => {
+  const result = await pool.query(
+    'SELECT * FROM ev_enrollments WHERE account_number = $1',
+    [account_number]
+  );
+  return result.rows[0] || { enrolled: false };
+};
+
+const checkEvEligibilityHandler = async ({ premise_number }: any) => {
+  const result = await pool.query(
+    'SELECT * FROM ev_eligibility WHERE premise_number = $1',
+    [premise_number]
+  );
+  return result.rows[0] || { eligible: false, found: false };
+};
 
 const matchPropertyToCustomerHandler = async ({ address }: any) => {
-  const premise = findPremiseByAddress(address);
+  const premise = await findPremiseByAddress(address);
 
-  if (premise?.premiseNumber !== "60587744") {
+  if (premise?.premise_number !== "60587744") {
     return { matched: false, event: "NO_MATCH" };
   }
 
@@ -194,22 +263,37 @@ const matchPropertyToCustomerHandler = async ({ address }: any) => {
   };
 };
 
-const getServiceConnectionQuoteHandler = async ({ premise_number }: any) => 
-  mockData.service_connection_quote[premise_number] ?? { found: false };
+const getServiceConnectionQuoteHandler = async ({ premise_number }: any) => {
+  const result = await pool.query(
+    'SELECT * FROM service_connection_quotes WHERE premise_number = $1',
+    [premise_number]
+  );
+  return result.rows[0] || { found: false };
+};
 
 const startServiceConnectionHandler = async (input: any) => ({
-  ...(mockData.action_responses.start_service_connection as Record<string, unknown>),
-  request: input
+  status: "SUBMITTED",
+  serviceOrderId: "SO-NPB-7741200",
+  premiseNumber: input.premise_number,
+  scheduledConnectDate: "2026-06-13",
+  message: "New residential power connection scheduled. No deposit required (existing customer in good standing). Confirmation also sent to customer email."
 });
 
 const enrollEvChargingHandler = async (input: any) => ({
-  ...(mockData.action_responses.enroll_ev_charging as Record<string, unknown>),
-  request: input
+  status: "ENROLLMENT_STARTED",
+  enrollmentId: "EVH-NPB-330145",
+  premiseNumber: input.premise_number,
+  installType: input.install_type === "full" ? "Full installation" : "Equipment-only",
+  monthlyCharge: input.install_type === "full" ? 36.00 : 27.00,
+  nextStep: "Electrical assessment - we'll text a link to upload garage photos",
+  estimatedCompletion: "2-3 months from electrical assessment",
+  message: "Started FPL EVolution Home enrollment. Because there's no existing 240V circuit in the garage, full installation is recommended at $36/month."
 });
 
 const setMoveIntentHandler = async (input: any) => ({
-  ...(mockData.action_responses.set_move_intent as Record<string, unknown>),
-  request: input
+  status: "RECORDED",
+  intent: input.intent === "keep_both" ? "KEEP_BOTH" : "MOVE_OUT",
+  message: "Noted that you intend to keep both the Miami and North Palm Beach properties. No move-out order created for the Miami account (5210099001)."
 });
 
 const createFplMcpServer = () => {
@@ -261,7 +345,7 @@ server.registerTool(
       account_number: z.string()
     }
   },
-  async ({ account_number }) => jsonContent(mockData.accounts[account_number] ?? { found: false })
+  async ({ account_number }) => jsonContent(await getAccountSummaryHandler({ account_number }))
 );
 
 server.registerTool(
@@ -274,15 +358,8 @@ server.registerTool(
     }
   },
   async ({ premise_number, address }) => {
-    let premise: Record<string, unknown> | undefined;
-
-    if (premise_number) {
-      premise = mockData.premises[premise_number];
-    } else if (address) {
-      premise = findPremiseByAddress(address);
-    }
-
-    return jsonContent(premise ?? { found: false });
+    const premise = await getPremiseDetailsHandler({ premise_number, address });
+    return jsonContent(premise);
   }
 );
 
@@ -294,7 +371,7 @@ server.registerTool(
       account_number: z.string()
     }
   },
-  async ({ account_number }) => jsonContent(mockData.billing[account_number]?.currentBill ?? { found: false })
+  async ({ account_number }) => jsonContent(await getBillingInquiryHandler({ account_number }))
 );
 
 server.registerTool(
@@ -306,11 +383,7 @@ server.registerTool(
     }
   },
   async ({ account_number }) =>
-    jsonContent({
-      payments: mockData.payment_history[account_number] ?? [],
-      autopayEnrolled: mockData.billing[account_number]?.autopayEnrolled ?? false,
-      nextScheduledPaymentDate: mockData.billing[account_number]?.nextScheduledPaymentDate
-    })
+    jsonContent(await getPaymentHistoryHandler({ account_number }))
 );
 
 server.registerTool(
@@ -321,7 +394,7 @@ server.registerTool(
       account_number: z.string()
     }
   },
-  async ({ account_number }) => jsonContent(mockData.usage_history[account_number] ?? [])
+  async ({ account_number }) => jsonContent(await getUsageHistoryHandler({ account_number }))
 );
 
 server.registerTool(
@@ -332,7 +405,7 @@ server.registerTool(
       account_number: z.string()
     }
   },
-  async ({ account_number }) => jsonContent(mockData.ev_enrollments[account_number] ?? { enrolled: false })
+  async ({ account_number }) => jsonContent(await getEvEnrollmentHandler({ account_number }))
 );
 
 server.registerTool(
@@ -343,7 +416,7 @@ server.registerTool(
       premise_number: z.string()
     }
   },
-  async ({ premise_number }) => jsonContent(mockData.ev_eligibility[premise_number] ?? { eligible: false, found: false })
+  async ({ premise_number }) => jsonContent(await checkEvEligibilityHandler({ premise_number }))
 );
 
 server.registerTool(
@@ -355,19 +428,8 @@ server.registerTool(
     }
   },
   async ({ address }) => {
-    const premise = findPremiseByAddress(address);
-
-    if (premise?.premiseNumber !== "60587744") {
-      return jsonContent({ matched: false, event: "NO_MATCH" });
-    }
-
-    return jsonContent({
-      matchedCustomer: "1009988776",
-      premiseNumber: "60587744",
-      event: "NEW_OWNER_RECORDED",
-      recordedDate: "2026-06-05",
-      existingServices: ["FPL EVolution Home @ premise 60412233", "Registered EV: Tesla Model Y"]
-    });
+    const result = await matchPropertyToCustomerHandler({ address });
+    return jsonContent(result);
   }
 );
 
@@ -379,7 +441,7 @@ server.registerTool(
       premise_number: z.string()
     }
   },
-  async ({ premise_number }) => jsonContent(mockData.service_connection_quote[premise_number] ?? { found: false })
+  async ({ premise_number }) => jsonContent(await getServiceConnectionQuoteHandler({ premise_number }))
 );
 
 server.registerTool(
@@ -393,10 +455,7 @@ server.registerTool(
     }
   },
   async (input) =>
-    jsonContent({
-      ...(mockData.action_responses.start_service_connection as Record<string, unknown>),
-      request: input
-    })
+    jsonContent(await startServiceConnectionHandler(input))
 );
 
 server.registerTool(
@@ -409,10 +468,7 @@ server.registerTool(
     }
   },
   async (input) =>
-    jsonContent({
-      ...(mockData.action_responses.enroll_ev_charging as Record<string, unknown>),
-      request: input
-    })
+    jsonContent(await enrollEvChargingHandler(input))
 );
 
 server.registerTool(
@@ -424,10 +480,7 @@ server.registerTool(
     }
   },
   async (input) =>
-    jsonContent({
-      ...(mockData.action_responses.set_move_intent as Record<string, unknown>),
-      request: input
-    })
+    jsonContent(await setMoveIntentHandler(input))
 );
 
   return server;
