@@ -500,6 +500,10 @@ const ensurePersistenceTables = async () => {
     );
   `);
 
+  await pool.query(`ALTER TABLE oauth_codes ADD COLUMN IF NOT EXISTS client_id TEXT`);
+  await pool.query(`ALTER TABLE oauth_codes ADD COLUMN IF NOT EXISTS code_challenge TEXT`);
+  await pool.query(`ALTER TABLE oauth_codes ADD COLUMN IF NOT EXISTS code_challenge_method TEXT`);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS oauth_refresh_tokens (
       refresh_token TEXT PRIMARY KEY,
@@ -511,6 +515,8 @@ const ensurePersistenceTables = async () => {
       created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );
   `);
+
+  await pool.query(`ALTER TABLE oauth_refresh_tokens ADD COLUMN IF NOT EXISTS client_id TEXT`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS oauth_clients (
@@ -2632,49 +2638,56 @@ const startHttpServer = () => {
   const port = Number(process.env.PORT ?? 3000);
 
   createServer(async (request, response) => {
-    const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+    try {
+      const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
 
-    if (url.pathname === "/health") {
-      writeJson(response, 200, { status: "ok", mcpPath: "/mcp", privacyPath: "/privacy" });
-      return;
+      if (url.pathname === "/health") {
+        writeJson(response, 200, { status: "ok", mcpPath: "/mcp", privacyPath: "/privacy" });
+        return;
+      }
+
+      if (url.pathname === "/privacy") {
+        writeHtml(response, 200, privacyPageHtml);
+        return;
+      }
+
+      if (url.pathname === "/.well-known/oauth-authorization-server") {
+        await handleOAuthMetadata(request, response);
+        return;
+      }
+
+      if (url.pathname === "/oauth/authorize" || url.pathname === "/authorize") {
+        await handleOAuthAuthorize(request, response, url);
+        return;
+      }
+
+      if (url.pathname === "/oauth/token" || url.pathname === "/token") {
+        await handleOAuthToken(request, response);
+        return;
+      }
+
+      if (url.pathname === "/oauth/refresh" || url.pathname === "/refresh") {
+        await handleOAuthRefresh(request, response);
+        return;
+      }
+
+      if (url.pathname === "/register") {
+        await handleOAuthRegister(request, response);
+        return;
+      }
+
+      if (url.pathname === "/mcp") {
+        await handleMcpRequest(request, response);
+        return;
+      }
+
+      writeJson(response, 404, { error: "Not found", mcpPath: "/mcp", healthPath: "/health", privacyPath: "/privacy" });
+    } catch (error) {
+      console.error("HTTP route handling error", error);
+      if (!response.headersSent) {
+        writeJson(response, 500, { error: "Internal server error" });
+      }
     }
-
-    if (url.pathname === "/privacy") {
-      writeHtml(response, 200, privacyPageHtml);
-      return;
-    }
-
-    if (url.pathname === "/.well-known/oauth-authorization-server") {
-      await handleOAuthMetadata(request, response);
-      return;
-    }
-
-    if (url.pathname === "/oauth/authorize" || url.pathname === "/authorize") {
-      await handleOAuthAuthorize(request, response, url);
-      return;
-    }
-
-    if (url.pathname === "/oauth/token" || url.pathname === "/token") {
-      await handleOAuthToken(request, response);
-      return;
-    }
-
-    if (url.pathname === "/oauth/refresh" || url.pathname === "/refresh") {
-      await handleOAuthRefresh(request, response);
-      return;
-    }
-
-    if (url.pathname === "/register") {
-      await handleOAuthRegister(request, response);
-      return;
-    }
-
-    if (url.pathname === "/mcp") {
-      await handleMcpRequest(request, response);
-      return;
-    }
-
-    writeJson(response, 404, { error: "Not found", mcpPath: "/mcp", healthPath: "/health", privacyPath: "/privacy" });
   }).listen(port, "0.0.0.0", () => {
     console.log(`FPL MCP HTTP server listening on port ${port}; endpoint: /mcp`);
   });
