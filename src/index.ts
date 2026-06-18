@@ -432,6 +432,9 @@ server.registerTool(
   return server;
 };
 
+// Create singleton server instance for reuse across requests
+const mcpServer = createFplMcpServer();
+
 const readRequestBody = async (request: IncomingMessage) => {
   const chunks: Buffer[] = [];
 
@@ -604,20 +607,19 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
         id: null
       });
     } finally {
-      await server.close();
+      // No server cleanup needed - using singleton
     }
     return;
   }
 
   // Handle all other requests through transport
   console.log(`[${new Date().toISOString()}] Handling tool call request: ${body?.method}`);
-  const server = createFplMcpServer();
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined
   });
 
   try {
-    await server.connect(transport);
+    await mcpServer.connect(transport);
     await transport.handleRequest(request, response, body);
     console.log(`[${new Date().toISOString()}] Request handled successfully`);
   } catch (error) {
@@ -635,7 +637,7 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
     }
   } finally {
     await transport.close();
-    await server.close();
+    // Don't close the singleton server - keep it alive for reuse
   }
 };
 
@@ -671,9 +673,8 @@ const startHttpServer = () => {
 };
 
 const startStdioServer = async () => {
-  const server = createFplMcpServer();
   const transport = new StdioServerTransport();
-  await server.connect(transport);
+  await mcpServer.connect(transport);
 };
 
 if (process.env.MCP_TRANSPORT === "http" || process.env.PORT) {

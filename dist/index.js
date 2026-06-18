@@ -9,7 +9,7 @@ const getCustomers = () => {
     if (Array.isArray(mockData.customers) && mockData.customers.length > 0) {
         return mockData.customers;
     }
-    return [mockData.customer];
+    return [];
 };
 const normalizeString = (value) => String(value ?? "").trim().toLowerCase();
 const matchesCustomerFilters = (customer, filters) => {
@@ -281,6 +281,8 @@ const createFplMcpServer = () => {
     }));
     return server;
 };
+// Create singleton server instance for reuse across requests
+const mcpServer = createFplMcpServer();
 const readRequestBody = async (request) => {
     const chunks = [];
     for await (const chunk of request) {
@@ -341,13 +343,17 @@ const privacyPageHtml = `<!doctype html>
   </body>
 </html>`;
 const handleMcpRequest = async (request, response) => {
+    console.log(`[${new Date().toISOString()}] Incoming request: ${request.method} ${request.url}`);
+    console.log(`[${new Date().toISOString()}] Headers:`, JSON.stringify(request.headers, null, 2));
     setCorsHeaders(response);
     if (request.method === "OPTIONS") {
+        console.log(`[${new Date().toISOString()}] OPTIONS request - returning 204`);
         response.writeHead(204);
         response.end();
         return;
     }
     if (request.method !== "POST") {
+        console.log(`[${new Date().toISOString()}] Method not allowed: ${request.method}`);
         writeJson(response, 405, {
             jsonrpc: "2.0",
             error: {
@@ -364,8 +370,10 @@ const handleMcpRequest = async (request, response) => {
         request.headers.accept = "application/json, text/event-stream";
     }
     const body = await readRequestBody(request);
+    console.log(`[${new Date().toISOString()}] Request body:`, JSON.stringify(body, null, 2));
     // Handle initialize
     if (body?.method === "initialize") {
+        console.log(`[${new Date().toISOString()}] Handling initialize request`);
         const initResponse = {
             jsonrpc: "2.0",
             id: body.id,
@@ -388,6 +396,7 @@ const handleMcpRequest = async (request, response) => {
     }
     // Handle tools/list - manually construct response without execution field
     if (body?.method === "tools/list") {
+        console.log(`[${new Date().toISOString()}] Handling tools/list request`);
         const server = createFplMcpServer();
         const transport = new StdioServerTransport();
         try {
@@ -431,21 +440,22 @@ const handleMcpRequest = async (request, response) => {
             });
         }
         finally {
-            await server.close();
+            // No server cleanup needed - using singleton
         }
         return;
     }
     // Handle all other requests through transport
-    const server = createFplMcpServer();
+    console.log(`[${new Date().toISOString()}] Handling tool call request: ${body?.method}`);
     const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined
     });
     try {
-        await server.connect(transport);
+        await mcpServer.connect(transport);
         await transport.handleRequest(request, response, body);
+        console.log(`[${new Date().toISOString()}] Request handled successfully`);
     }
     catch (error) {
-        console.error("Error handling MCP request", error);
+        console.error(`[${new Date().toISOString()}] Error handling MCP request:`, error);
         if (!response.headersSent) {
             writeJson(response, 500, {
                 jsonrpc: "2.0",
@@ -459,18 +469,21 @@ const handleMcpRequest = async (request, response) => {
     }
     finally {
         await transport.close();
-        await server.close();
+        // Don't close the singleton server - keep it alive for reuse
     }
 };
 const startHttpServer = () => {
     const port = Number(process.env.PORT ?? 3000);
     createServer(async (request, response) => {
         const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+        console.log(`[${new Date().toISOString()}] HTTP ${request.method} ${url.pathname}`);
         if (url.pathname === "/health") {
+            console.log(`[${new Date().toISOString()}] Health check requested`);
             writeJson(response, 200, { status: "ok", mcpPath: "/mcp", privacyPath: "/privacy" });
             return;
         }
         if (url.pathname === "/privacy") {
+            console.log(`[${new Date().toISOString()}] Privacy page requested`);
             writeHtml(response, 200, privacyPageHtml);
             return;
         }
@@ -478,15 +491,15 @@ const startHttpServer = () => {
             await handleMcpRequest(request, response);
             return;
         }
+        console.log(`[${new Date().toISOString()}] 404 Not found: ${url.pathname}`);
         writeJson(response, 404, { error: "Not found", mcpPath: "/mcp", healthPath: "/health", privacyPath: "/privacy" });
     }).listen(port, "0.0.0.0", () => {
-        console.log(`FPL MCP HTTP server listening on port ${port}; endpoint: /mcp`);
+        console.log(`[${new Date().toISOString()}] FPL MCP HTTP server listening on port ${port}; endpoint: /mcp`);
     });
 };
 const startStdioServer = async () => {
-    const server = createFplMcpServer();
     const transport = new StdioServerTransport();
-    await server.connect(transport);
+    await mcpServer.connect(transport);
 };
 if (process.env.MCP_TRANSPORT === "http" || process.env.PORT) {
     startHttpServer();
