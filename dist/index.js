@@ -1994,6 +1994,21 @@ const handleOAuthMetadata = async (request, response) => {
         token_endpoint_auth_methods_supported: ["none", "client_secret_post", "client_secret_basic"]
     });
 };
+const handleOpenIdConfiguration = async (request, response) => {
+    writeJson(response, 200, {
+        issuer: createOAuthEndpoint(request, ""),
+        authorization_endpoint: createOAuthEndpoint(request, "/oauth/authorize"),
+        token_endpoint: createOAuthEndpoint(request, "/oauth/token"),
+        registration_endpoint: createOAuthEndpoint(request, "/register"),
+        response_types_supported: ["code"],
+        grant_types_supported: ["authorization_code", "refresh_token"],
+        code_challenge_methods_supported: ["S256", "plain"],
+        token_endpoint_auth_methods_supported: ["none", "client_secret_post", "client_secret_basic"],
+        scopes_supported: ["openid", "profile", "email"],
+        subject_types_supported: ["public"],
+        id_token_signing_alg_values_supported: ["RS256", "HS256"]
+    });
+};
 const handleOAuthRefresh = async (request, response) => {
     setCorsHeaders(response);
     if (request.method === "OPTIONS") {
@@ -2075,6 +2090,12 @@ const startHttpServer = () => {
             }
             if (url.pathname === "/.well-known/oauth-authorization-server") {
                 await handleOAuthMetadata(request, response);
+                return;
+            }
+            if (url.pathname === "/.well-known/openid-configuration" ||
+                url.pathname === "/mcp/.well-known/openid-configuration" ||
+                url.pathname === "/.well-known/openid-configuration/mcp") {
+                await handleOpenIdConfiguration(request, response);
                 return;
             }
             if (url.pathname === "/oauth/authorize" || url.pathname === "/authorize") {
