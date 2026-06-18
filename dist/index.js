@@ -1324,6 +1324,50 @@ const writeHtml = (response, statusCode, html) => {
     response.writeHead(statusCode, { "Content-Type": "text/html; charset=utf-8" });
     response.end(html);
 };
+const ACCOUNT_SCOPED_TOOLS = new Set([
+    "get_account_summary",
+    "get_billing_inquiry",
+    "get_payment_history",
+    "get_usage_history",
+    "get_ev_enrollment",
+    "set_autopay",
+    "cancel_autopay",
+    "update_payment_method",
+    "request_payment_extension",
+    "get_disconnection_risk",
+    "start_stop_transfer_service",
+    "schedule_reconnect",
+    "get_service_orders",
+    "get_ev_charging_sessions",
+    "update_ev_enrollment_plan",
+    "pause_ev_enrollment",
+    "cancel_ev_enrollment",
+    "manage_authorized_users",
+    "set_paperless_billing",
+    "get_rate_plan_options",
+    "compare_rate_plan_savings",
+    "get_peak_alerts",
+    "recommend_ev_charging_window",
+    "projected_next_bill",
+    "create_support_case"
+]);
+const CUSTOMER_SCOPED_TOOLS = new Set([
+    "get_customer_profile",
+    "register_vehicle",
+    "update_contact_info",
+    "update_notification_preferences",
+    "set_preferred_language",
+    "verify_identity_stepup"
+]);
+const getDefaultAccountNumberForUser = async (userId) => {
+    const result = await pool.query(`SELECT a.account_number
+     FROM user_customers uc
+     INNER JOIN accounts a ON a.customer_number = uc.customer_number
+     WHERE uc.user_id = $1
+     ORDER BY uc.is_primary DESC, a.account_number ASC
+     LIMIT 1`, [userId]);
+    return result.rows[0]?.account_number ?? null;
+};
 const privacyPageHtml = `<!doctype html>
 <html lang="en">
   <head>
@@ -1410,16 +1454,52 @@ const handleMcpRequest = async (request, response) => {
                 return;
             }
             const userCustomerNumbers = await getUserCustomerNumbers(decoded.userId);
+            const toolName = String(body.params.name ?? "");
+            if (!body.params.arguments || typeof body.params.arguments !== "object") {
+                body.params.arguments = {};
+            }
+            const toolArguments = body.params.arguments;
+            const shouldEnforceCustomerAccess = userCustomerNumbers.length > 0;
+            if (toolName === "lookup_account") {
+                const hasAnyLookupValue = ["account_number", "customer_number", "phone", "email", "premise_number", "address"]
+                    .some((key) => typeof toolArguments[key] === "string" && String(toolArguments[key]).trim() !== "");
+                if (!hasAnyLookupValue && decoded.email) {
+                    toolArguments.email = decoded.email;
+                }
+            }
+            if (shouldEnforceCustomerAccess && CUSTOMER_SCOPED_TOOLS.has(toolName) && typeof toolArguments.customer_number !== "string") {
+                toolArguments.customer_number = userCustomerNumbers[0];
+            }
+            if (shouldEnforceCustomerAccess && ACCOUNT_SCOPED_TOOLS.has(toolName) && typeof toolArguments.account_number !== "string") {
+                const defaultAccountNumber = await getDefaultAccountNumberForUser(decoded.userId);
+                if (defaultAccountNumber) {
+                    toolArguments.account_number = defaultAccountNumber;
+                }
+            }
             // Check if user has access to the requested customer data
-            if (body.params.arguments?.customer_number) {
-                const customerNumber = body.params.arguments.customer_number;
-                const shouldEnforceCustomerAccess = userCustomerNumbers.length > 0;
+            if (toolArguments.customer_number) {
+                const customerNumber = toolArguments.customer_number;
                 if (shouldEnforceCustomerAccess && typeof customerNumber === 'string' && !await hasCustomerAccess(decoded.userId, customerNumber)) {
                     writeJson(response, 403, {
                         jsonrpc: "2.0",
                         error: {
                             code: -32002,
                             message: "Access denied. You don't have permission to access this customer's data."
+                        },
+                        id: body.id
+                    });
+                    return;
+                }
+            }
+            if (toolArguments.account_number && shouldEnforceCustomerAccess && typeof toolArguments.account_number === "string") {
+                const accountResult = await pool.query("SELECT customer_number FROM accounts WHERE account_number = $1", [toolArguments.account_number]);
+                const accountCustomerNumber = accountResult.rows[0]?.customer_number;
+                if (accountCustomerNumber && !userCustomerNumbers.includes(accountCustomerNumber)) {
+                    writeJson(response, 403, {
+                        jsonrpc: "2.0",
+                        error: {
+                            code: -32002,
+                            message: "Access denied. You don't have permission to access this account's data."
                         },
                         id: body.id
                     });
