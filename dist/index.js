@@ -37,8 +37,8 @@ const getCustomers = async () => {
     return result.rows;
 };
 const matchesCustomerFilters = (customer, filters) => {
-    const customerNumber = String(customer.customerNumber ?? "");
-    const mobilePhone = String(customer.mobilePhone ?? "");
+    const customerNumber = String(customer.customer_number ?? "");
+    const mobilePhone = String(customer.mobile_phone ?? "");
     const email = normalizeString(customer.email);
     const matchesCustomerNumber = !filters.customer_number || filters.customer_number === customerNumber;
     const matchesPhone = !filters.phone || filters.phone === mobilePhone;
