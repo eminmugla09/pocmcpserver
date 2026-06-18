@@ -11,7 +11,8 @@ const isUuid = (value: string): boolean => UUID_V4_REGEX.test(value);
 // Database connection
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
+  ssl: process.env.DATABASE_URL?.includes('neon.tech') ? { rejectUnauthorized: false } : false,
+  connectionTimeoutMillis: 30000
 });
 
 export interface User {

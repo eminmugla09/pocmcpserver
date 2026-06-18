@@ -16,18 +16,6 @@ CREATE TABLE users (
     is_active BOOLEAN DEFAULT TRUE
 );
 
--- User-Customers junction table (links users to customer accounts they can access)
-CREATE TABLE user_customers (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL,
-    customer_number VARCHAR(20) NOT NULL,
-    is_primary BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (customer_number) REFERENCES customers(customer_number) ON DELETE CASCADE,
-    UNIQUE(user_id, customer_number)
-);
-
 -- Customer table
 CREATE TABLE customers (
     customer_number VARCHAR(20) PRIMARY KEY,
@@ -43,6 +31,18 @@ CREATE TABLE customers (
     account_standing_flag VARCHAR(50) DEFAULT 'GOOD',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- User-Customers junction table (links users to customer accounts they can access)
+CREATE TABLE user_customers (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL,
+    customer_number VARCHAR(20) NOT NULL,
+    is_primary BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (customer_number) REFERENCES customers(customer_number) ON DELETE CASCADE,
+    UNIQUE(user_id, customer_number)
 );
 
 -- Accounts table
@@ -185,7 +185,8 @@ CREATE TABLE billing (
     next_scheduled_payment_amount_usd DECIMAL(10, 2),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (account_number) REFERENCES accounts(account_number) ON DELETE CASCADE
+    FOREIGN KEY (account_number) REFERENCES accounts(account_number) ON DELETE CASCADE,
+    UNIQUE (account_number, invoice_id)
 );
 
 -- Bill Charges table (breakdown of billing charges)
@@ -208,7 +209,8 @@ CREATE TABLE payment_history (
     confirmation VARCHAR(50),
     status VARCHAR(50),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (account_number) REFERENCES accounts(account_number) ON DELETE CASCADE
+    FOREIGN KEY (account_number) REFERENCES accounts(account_number) ON DELETE CASCADE,
+    UNIQUE (account_number, payment_date)
 );
 
 -- Usage History table

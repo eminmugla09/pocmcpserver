@@ -8,6 +8,13 @@ INSERT INTO users (email, password_hash, full_name) VALUES
 ('rjvargas87@gmail.com', '$2b$10$PQCIs2gN6MFaUlY1dvPdsORZJdvLvcSz728KTMfthuOqEtgm7JIEC', 'Ricardo Vargas')
 ON CONFLICT (email) DO NOTHING;
 
+-- Insert customers
+INSERT INTO customers (customer_number, business_partner_id, first_name, last_name, full_name, email, mobile_phone, preferred_contact_method, preferred_language, customer_since, account_standing_flag)
+VALUES 
+  ('1009988776', '1009988776', 'Emin', 'Mugla', 'Emin Mugla', 'woarzus@gmail.com', '954-666-2333', 'Mobile', 'EN', '2018-03-09', 'GOOD'),
+  ('2009988777', '2009988777', 'Ricardo', 'Vargas', 'Ricardo Vargas', 'rjvargas87@gmail.com', '978-430-9223', 'Email', 'EN', '2020-07-15', 'GOOD')
+ON CONFLICT (customer_number) DO NOTHING;
+
 -- Link users to customers (will be updated with actual user IDs after insertion)
 -- This needs to be done in a transaction to get the user IDs
 DO $$
@@ -20,15 +27,9 @@ BEGIN
   
   INSERT INTO user_customers (user_id, customer_number, is_primary) VALUES
   (emin_user_id, '1009988776', TRUE),
-  (ricardo_user_id, '2009988777', TRUE);
+  (ricardo_user_id, '2009988777', TRUE)
+  ON CONFLICT (user_id, customer_number) DO NOTHING;
 END $$;
-
--- Insert customers
-INSERT INTO customers (customer_number, business_partner_id, first_name, last_name, full_name, email, mobile_phone, preferred_contact_method, preferred_language, customer_since, account_standing_flag)
-VALUES 
-  ('1009988776', '1009988776', 'Emin', 'Mugla', 'Emin Mugla', 'woarzus@gmail.com', '954-666-2333', 'Mobile', 'EN', '2018-03-09', 'GOOD'),
-  ('2009988777', '2009988777', 'Ricardo', 'Vargas', 'Ricardo Vargas', 'rjvargas87@gmail.com', '978-430-9223', 'Email', 'EN', '2020-07-15', 'GOOD')
-ON CONFLICT (customer_number) DO NOTHING;
 
 -- Insert accounts
 INSERT INTO accounts (account_number, contract_account_id, customer_number, premise_number, account_type, rate_class, status, standing, past_due_flag, payment_extension_flag, tax_exempt_flag, pending_connect_disconnect_flag, smart_meter_flag, budget_billing_flag, service_address_line1, service_address_city, service_address_state, service_address_zip)

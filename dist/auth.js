@@ -8,7 +8,8 @@ const isUuid = (value) => UUID_V4_REGEX.test(value);
 // Database connection
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false }
+    ssl: process.env.DATABASE_URL?.includes('neon.tech') ? { rejectUnauthorized: false } : false,
+    connectionTimeoutMillis: 30000
 });
 // Register a new user
 export async function register(input) {

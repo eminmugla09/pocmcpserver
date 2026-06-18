@@ -54,19 +54,20 @@ const findAccounts = async (input) => {
         phone: input.phone,
         email: input.email
     });
-    if (matchingCustomers.length === 0) {
+    const shouldFilterByCustomer = Boolean(input.customer_number || input.phone || input.email);
+    if (shouldFilterByCustomer && matchingCustomers.length === 0) {
         return [];
     }
     const matchingCustomerNumbers = new Set(matchingCustomers.map((customer) => customer.customer_number).filter(Boolean));
     const query = `
     SELECT * FROM accounts 
     WHERE ($1::text = '' OR account_number = $1)
-    AND ($2::text = '' OR customer_number = ANY($3::text[]))
+    AND ($2::boolean = false OR customer_number = ANY($3::text[]))
     AND ($4::text = '' OR premise_number = $4)
   `;
     const result = await pool.query(query, [
         input.account_number || '',
-        '',
+        shouldFilterByCustomer,
         Array.from(matchingCustomerNumbers),
         premiseNumber || ''
     ]);
@@ -212,6 +213,692 @@ const setMoveIntentHandler = async (input) => ({
     intent: input.intent === "keep_both" ? "KEEP_BOTH" : "MOVE_OUT",
     message: "Noted that you intend to keep both the Miami and North Palm Beach properties. No move-out order created for the Miami account (5210099001)."
 });
+const makeVehicleId = () => `EVREG-${Math.floor(1000 + Math.random() * 9000)}`;
+const registerVehicleHandler = async (input) => {
+    const { customer_number, linked_premise, make, model, year, connector_type, vehicle_id } = input;
+    const finalVehicleId = vehicle_id || makeVehicleId();
+    const result = await pool.query(`INSERT INTO registered_vehicles
+      (vehicle_id, customer_number, premise_number, make, model, year, connector_type, registered_date)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_DATE)
+     RETURNING vehicle_id, customer_number, premise_number, make, model, year, connector_type, registered_date`, [
+        finalVehicleId,
+        customer_number,
+        linked_premise || null,
+        make,
+        model,
+        year,
+        connector_type
+    ]);
+    return {
+        status: "REGISTERED",
+        message: "Vehicle registered successfully.",
+        vehicle: result.rows[0]
+    };
+};
+const updateRegisteredVehicleHandler = async (input) => {
+    const { vehicle_id, linked_premise, make, model, year, connector_type } = input;
+    const updates = [];
+    const values = [];
+    if (linked_premise !== undefined) {
+        updates.push(`premise_number = $${updates.length + 1}`);
+        values.push(linked_premise || null);
+    }
+    if (make !== undefined) {
+        updates.push(`make = $${updates.length + 1}`);
+        values.push(make);
+    }
+    if (model !== undefined) {
+        updates.push(`model = $${updates.length + 1}`);
+        values.push(model);
+    }
+    if (year !== undefined) {
+        updates.push(`year = $${updates.length + 1}`);
+        values.push(year);
+    }
+    if (connector_type !== undefined) {
+        updates.push(`connector_type = $${updates.length + 1}`);
+        values.push(connector_type);
+    }
+    if (updates.length === 0) {
+        return { status: "NO_CHANGES", message: "No update fields were provided." };
+    }
+    values.push(vehicle_id);
+    const result = await pool.query(`UPDATE registered_vehicles
+     SET ${updates.join(", ")}
+     WHERE vehicle_id = $${updates.length + 1}
+     RETURNING vehicle_id, customer_number, premise_number, make, model, year, connector_type, registered_date`, values);
+    if (result.rows.length === 0) {
+        return { status: "NOT_FOUND", message: "Vehicle not found." };
+    }
+    return {
+        status: "UPDATED",
+        message: "Vehicle updated successfully.",
+        vehicle: result.rows[0]
+    };
+};
+const removeRegisteredVehicleHandler = async ({ vehicle_id }) => {
+    const result = await pool.query(`DELETE FROM registered_vehicles
+     WHERE vehicle_id = $1
+     RETURNING vehicle_id, customer_number, premise_number, make, model, year, connector_type, registered_date`, [vehicle_id]);
+    if (result.rows.length === 0) {
+        return { status: "NOT_FOUND", message: "Vehicle not found." };
+    }
+    return {
+        status: "REMOVED",
+        message: "Vehicle removed successfully.",
+        vehicle: result.rows[0]
+    };
+};
+const makeId = (prefix) => `${prefix}-${Math.floor(100000 + Math.random() * 900000)}`;
+const ensurePersistenceTables = async () => {
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS service_orders (
+      service_order_id TEXT PRIMARY KEY,
+      account_number TEXT,
+      order_type TEXT NOT NULL,
+      from_premise TEXT,
+      to_premise TEXT,
+      effective_date DATE,
+      status TEXT NOT NULL,
+      cancel_reason TEXT,
+      metadata JSONB,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS payment_methods (
+      account_number TEXT PRIMARY KEY,
+      method_type TEXT NOT NULL,
+      last4 TEXT,
+      label TEXT,
+      metadata JSONB,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS customer_notification_preferences (
+      customer_number TEXT PRIMARY KEY,
+      billing_channel TEXT NOT NULL,
+      outage_channel TEXT NOT NULL,
+      marketing_opt_in BOOLEAN DEFAULT FALSE,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS authorized_users (
+      id BIGSERIAL PRIMARY KEY,
+      account_number TEXT NOT NULL,
+      user_email TEXT NOT NULL,
+      role TEXT NOT NULL,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(account_number, user_email)
+    );
+  `);
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS support_cases (
+      case_id TEXT PRIMARY KEY,
+      account_number TEXT NOT NULL,
+      category TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      description TEXT NOT NULL,
+      priority TEXT NOT NULL,
+      status TEXT NOT NULL,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS verification_sessions (
+      session_id TEXT PRIMARY KEY,
+      customer_number TEXT NOT NULL,
+      method TEXT NOT NULL,
+      status TEXT NOT NULL,
+      challenge_code_hint TEXT,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id TEXT PRIMARY KEY,
+      action TEXT NOT NULL,
+      account_number TEXT,
+      customer_number TEXT,
+      details JSONB,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS oauth_codes (
+      code TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      email TEXT NOT NULL,
+      redirect_uri TEXT NOT NULL,
+      expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+      used BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+};
+const addAudit = async (action, details) => {
+    const accountNumber = typeof details.account_number === "string"
+        ? details.account_number
+        : (typeof details.accountNumber === "string" ? details.accountNumber : null);
+    const customerNumber = typeof details.customer_number === "string"
+        ? details.customer_number
+        : (typeof details.customerNumber === "string" ? details.customerNumber : null);
+    await pool.query(`INSERT INTO audit_log (id, action, account_number, customer_number, details)
+     VALUES ($1, $2, $3, $4, $5::jsonb)`, [
+        makeId("AUD"),
+        action,
+        accountNumber,
+        customerNumber,
+        JSON.stringify(details)
+    ]);
+};
+const setAutopayHandler = async ({ account_number, payment_method }) => {
+    const latestBillResult = await pool.query(`SELECT due_date, amount_due FROM billing
+     WHERE account_number = $1
+     ORDER BY bill_date DESC
+     LIMIT 1`, [account_number]);
+    const latestBill = latestBillResult.rows[0];
+    await pool.query(`UPDATE billing
+     SET autopay_enrolled = TRUE,
+         next_scheduled_payment_date = $2,
+         next_scheduled_payment_amount_usd = $3,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE account_number = $1`, [account_number, latestBill?.due_date || null, latestBill?.amount_due || null]);
+    if (payment_method) {
+        await pool.query(`INSERT INTO payment_methods (account_number, method_type, metadata, updated_at)
+       VALUES ($1, $2, $3::jsonb, CURRENT_TIMESTAMP)
+       ON CONFLICT (account_number)
+       DO UPDATE SET method_type = EXCLUDED.method_type,
+                     metadata = EXCLUDED.metadata,
+                     updated_at = CURRENT_TIMESTAMP`, [account_number, String(payment_method.methodType || payment_method.method_type || "unknown"), JSON.stringify(payment_method)]);
+    }
+    await addAudit("set_autopay", { account_number });
+    return {
+        status: "AUTOPAY_ENABLED",
+        accountNumber: account_number,
+        nextScheduledPaymentDate: latestBill?.due_date || null,
+        nextScheduledPaymentAmountUsd: latestBill?.amount_due || null
+    };
+};
+const cancelAutopayHandler = async ({ account_number }) => {
+    await pool.query(`UPDATE billing
+     SET autopay_enrolled = FALSE,
+         next_scheduled_payment_date = NULL,
+         next_scheduled_payment_amount_usd = NULL,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE account_number = $1`, [account_number]);
+    await addAudit("cancel_autopay", { account_number });
+    return {
+        status: "AUTOPAY_DISABLED",
+        accountNumber: account_number
+    };
+};
+const updatePaymentMethodHandler = async ({ account_number, method_type, last4, label }) => {
+    await pool.query(`INSERT INTO payment_methods (account_number, method_type, last4, label, metadata, updated_at)
+     VALUES ($1, $2, $3, $4, $5::jsonb, CURRENT_TIMESTAMP)
+     ON CONFLICT (account_number)
+     DO UPDATE SET method_type = EXCLUDED.method_type,
+                   last4 = EXCLUDED.last4,
+                   label = EXCLUDED.label,
+                   metadata = EXCLUDED.metadata,
+                   updated_at = CURRENT_TIMESTAMP`, [
+        account_number,
+        method_type,
+        last4 || null,
+        label || null,
+        JSON.stringify({ methodType: method_type, last4: last4 || null, label: label || null })
+    ]);
+    await addAudit("update_payment_method", { account_number, method_type });
+    const paymentMethod = {
+        methodType: method_type,
+        last4: last4 || null,
+        label: label || null,
+        updatedAt: new Date().toISOString()
+    };
+    return {
+        status: "PAYMENT_METHOD_UPDATED",
+        accountNumber: account_number,
+        paymentMethod
+    };
+};
+const requestPaymentExtensionHandler = async ({ account_number, requested_due_date, reason }) => {
+    await pool.query(`UPDATE billing
+     SET due_date = $2,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = (
+       SELECT id FROM billing
+       WHERE account_number = $1
+       ORDER BY bill_date DESC
+       LIMIT 1
+     )`, [account_number, requested_due_date]);
+    await addAudit("request_payment_extension", { account_number, requested_due_date, reason: reason || null });
+    return {
+        status: "APPROVED",
+        accountNumber: account_number,
+        extendedDueDate: requested_due_date,
+        message: "Payment extension request approved for this bill cycle."
+    };
+};
+const getDisconnectionRiskHandler = async ({ account_number }) => {
+    const accountResult = await pool.query('SELECT past_due_flag FROM accounts WHERE account_number = $1', [account_number]);
+    const billResult = await pool.query(`SELECT due_date, amount_due, payment_status
+     FROM billing
+     WHERE account_number = $1
+     ORDER BY bill_date DESC
+     LIMIT 1`, [account_number]);
+    const account = accountResult.rows[0];
+    const bill = billResult.rows[0];
+    const isPastDue = Boolean(account?.past_due_flag);
+    const riskLevel = isPastDue ? "MEDIUM" : "LOW";
+    return {
+        accountNumber: account_number,
+        riskLevel,
+        pastDueFlag: isPastDue,
+        dueDate: bill?.due_date || null,
+        amountDue: bill?.amount_due || null,
+        paymentStatus: bill?.payment_status || "Current",
+        recommendation: isPastDue ? "Pay or request extension to avoid service interruption." : "No disconnection risk detected."
+    };
+};
+const startStopTransferServiceHandler = async ({ action, account_number, from_premise, to_premise, effective_date }) => {
+    const serviceOrderId = makeId("SO");
+    await pool.query(`INSERT INTO service_orders
+      (service_order_id, account_number, order_type, from_premise, to_premise, effective_date, status, metadata)
+     VALUES ($1, $2, $3, $4, $5, $6, 'SCHEDULED', '{}'::jsonb)`, [serviceOrderId, account_number, action, from_premise || null, to_premise || null, effective_date || null]);
+    await addAudit("start_stop_transfer_service", { account_number, action, serviceOrderId });
+    const order = {
+        serviceOrderId,
+        accountNumber: account_number,
+        type: action,
+        fromPremise: from_premise || null,
+        toPremise: to_premise || null,
+        effectiveDate: effective_date || null,
+        status: "SCHEDULED"
+    };
+    return order;
+};
+const scheduleReconnectHandler = async ({ account_number, reconnect_date }) => {
+    const serviceOrderId = makeId("SO");
+    await pool.query(`INSERT INTO service_orders
+      (service_order_id, account_number, order_type, effective_date, status, metadata)
+     VALUES ($1, $2, 'reconnect', $3, 'SCHEDULED', '{}'::jsonb)`, [serviceOrderId, account_number, reconnect_date]);
+    await addAudit("schedule_reconnect", { account_number, reconnect_date, serviceOrderId });
+    const order = {
+        serviceOrderId,
+        accountNumber: account_number,
+        type: "reconnect",
+        effectiveDate: reconnect_date,
+        status: "SCHEDULED"
+    };
+    return order;
+};
+const updateServiceStartDateHandler = async ({ service_order_id, new_start_date }) => {
+    const result = await pool.query(`UPDATE service_orders
+     SET effective_date = $2,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE service_order_id = $1
+     RETURNING *`, [service_order_id, new_start_date]);
+    if (result.rows.length === 0) {
+        return { status: "NOT_FOUND", message: "Service order not found." };
+    }
+    await addAudit("update_service_start_date", { service_order_id, new_start_date });
+    const row = result.rows[0];
+    return {
+        status: "UPDATED",
+        order: {
+            serviceOrderId: row.service_order_id,
+            accountNumber: row.account_number,
+            type: row.order_type,
+            fromPremise: row.from_premise,
+            toPremise: row.to_premise,
+            effectiveDate: row.effective_date,
+            status: row.status,
+            cancelReason: row.cancel_reason
+        }
+    };
+};
+const getServiceOrdersHandler = async ({ account_number }) => {
+    const result = account_number
+        ? await pool.query('SELECT * FROM service_orders WHERE account_number = $1 ORDER BY created_at DESC', [account_number])
+        : await pool.query('SELECT * FROM service_orders ORDER BY created_at DESC');
+    return result.rows.map((row) => ({
+        serviceOrderId: row.service_order_id,
+        accountNumber: row.account_number,
+        type: row.order_type,
+        fromPremise: row.from_premise,
+        toPremise: row.to_premise,
+        effectiveDate: row.effective_date,
+        status: row.status,
+        cancelReason: row.cancel_reason,
+        metadata: row.metadata,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+    }));
+};
+const cancelServiceOrderHandler = async ({ service_order_id, reason }) => {
+    const result = await pool.query(`UPDATE service_orders
+     SET status = 'CANCELLED',
+         cancel_reason = $2,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE service_order_id = $1
+     RETURNING *`, [service_order_id, reason || null]);
+    if (result.rows.length === 0) {
+        return { status: "NOT_FOUND", message: "Service order not found." };
+    }
+    await addAudit("cancel_service_order", { service_order_id });
+    const row = result.rows[0];
+    return {
+        status: "CANCELLED",
+        order: {
+            serviceOrderId: row.service_order_id,
+            accountNumber: row.account_number,
+            type: row.order_type,
+            fromPremise: row.from_premise,
+            toPremise: row.to_premise,
+            effectiveDate: row.effective_date,
+            status: row.status,
+            cancelReason: row.cancel_reason
+        }
+    };
+};
+const getEvChargingSessionsHandler = async ({ account_number, months }) => {
+    const maxMonths = Math.min(Math.max(Number(months || 3), 1), 12);
+    const usageResult = await pool.query(`SELECT month, ev_charging_kwh
+     FROM usage_history
+     WHERE account_number = $1
+     ORDER BY month DESC
+     LIMIT $2`, [account_number, maxMonths]);
+    return usageResult.rows.map((row) => ({
+        month: row.month,
+        totalKwh: row.ev_charging_kwh || 0,
+        sessions: Math.max(1, Math.round((row.ev_charging_kwh || 0) / 30)),
+        averageSessionKwh: row.ev_charging_kwh ? Number((row.ev_charging_kwh / Math.max(1, Math.round(row.ev_charging_kwh / 30))).toFixed(2)) : 0
+    }));
+};
+const updateEvEnrollmentPlanHandler = async ({ account_number, install_type }) => {
+    const isFull = install_type === "full";
+    const monthlyCharge = isFull ? 36 : 27;
+    const result = await pool.query(`UPDATE ev_enrollments
+     SET is_full_installation = $2,
+         is_equipment_only = $3,
+         monthly_charge = $4,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE account_number = $1
+     RETURNING *`, [account_number, isFull, !isFull, monthlyCharge]);
+    await addAudit("update_ev_enrollment_plan", { account_number, install_type });
+    return {
+        status: result.rows.length > 0 ? "UPDATED" : "NOT_FOUND",
+        enrollment: result.rows[0] || null
+    };
+};
+const pauseEvEnrollmentHandler = async ({ account_number, reason }) => {
+    const result = await pool.query(`UPDATE ev_enrollments
+     SET status = 'Paused',
+         updated_at = CURRENT_TIMESTAMP
+     WHERE account_number = $1
+     RETURNING *`, [account_number]);
+    await addAudit("pause_ev_enrollment", { account_number, reason: reason || null });
+    return { status: result.rows.length > 0 ? "PAUSED" : "NOT_FOUND", enrollment: result.rows[0] || null };
+};
+const cancelEvEnrollmentHandler = async ({ account_number, reason }) => {
+    const result = await pool.query(`UPDATE ev_enrollments
+     SET status = 'Cancelled',
+         updated_at = CURRENT_TIMESTAMP
+     WHERE account_number = $1
+     RETURNING *`, [account_number]);
+    await addAudit("cancel_ev_enrollment", { account_number, reason: reason || null });
+    return { status: result.rows.length > 0 ? "CANCELLED" : "NOT_FOUND", enrollment: result.rows[0] || null };
+};
+const scheduleEvAssessmentHandler = async ({ premise_number, preferred_date }) => {
+    const assessmentId = makeId("EVA");
+    await pool.query(`INSERT INTO service_orders
+      (service_order_id, account_number, order_type, effective_date, status, metadata)
+     VALUES ($1, NULL, 'ev_assessment', $2, 'SCHEDULED', $3::jsonb)`, [assessmentId, preferred_date || null, JSON.stringify({ premiseNumber: premise_number })]);
+    await addAudit("schedule_ev_assessment", { premise_number, assessmentId });
+    const assessment = {
+        assessmentId,
+        premiseNumber: premise_number,
+        preferredDate: preferred_date || null,
+        status: "SCHEDULED"
+    };
+    return assessment;
+};
+const uploadGarageRequirementsStatusHandler = async ({ premise_number, photos_uploaded, wifi_ready, circuit_240v_ready, notes }) => {
+    const result = await pool.query(`UPDATE premises
+     SET strong_wifi_at_charging_location = COALESCE($2, strong_wifi_at_charging_location),
+         existing_240v_circuit_in_garage = COALESCE($3, existing_240v_circuit_in_garage),
+         updated_at = CURRENT_TIMESTAMP
+     WHERE premise_number = $1
+     RETURNING *`, [premise_number, wifi_ready, circuit_240v_ready]);
+    await addAudit("upload_garage_requirements_status", { premise_number, photos_uploaded: Boolean(photos_uploaded), notes: notes || null });
+    return {
+        status: result.rows.length > 0 ? "RECORDED" : "NOT_FOUND",
+        premise: result.rows[0] || null,
+        photosUploaded: Boolean(photos_uploaded),
+        notes: notes || null
+    };
+};
+const updateContactInfoHandler = async ({ customer_number, email, mobile_phone }) => {
+    const result = await pool.query(`UPDATE customers
+     SET email = COALESCE($2, email),
+         mobile_phone = COALESCE($3, mobile_phone),
+         updated_at = CURRENT_TIMESTAMP
+     WHERE customer_number = $1
+     RETURNING *`, [customer_number, email || null, mobile_phone || null]);
+    await addAudit("update_contact_info", { customer_number });
+    return { status: result.rows.length > 0 ? "UPDATED" : "NOT_FOUND", customer: result.rows[0] || null };
+};
+const updateNotificationPreferencesHandler = async ({ customer_number, billing_channel, outage_channel, marketing_opt_in }) => {
+    const preferences = {
+        customerNumber: customer_number,
+        billingChannel: billing_channel || "email",
+        outageChannel: outage_channel || "sms",
+        marketingOptIn: Boolean(marketing_opt_in),
+        updatedAt: new Date().toISOString()
+    };
+    await pool.query(`INSERT INTO customer_notification_preferences
+      (customer_number, billing_channel, outage_channel, marketing_opt_in, updated_at)
+     VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+     ON CONFLICT (customer_number)
+     DO UPDATE SET billing_channel = EXCLUDED.billing_channel,
+                   outage_channel = EXCLUDED.outage_channel,
+                   marketing_opt_in = EXCLUDED.marketing_opt_in,
+                   updated_at = CURRENT_TIMESTAMP`, [customer_number, preferences.billingChannel, preferences.outageChannel, preferences.marketingOptIn]);
+    await addAudit("update_notification_preferences", { customer_number });
+    return { status: "UPDATED", preferences };
+};
+const setPreferredLanguageHandler = async ({ customer_number, preferred_language }) => {
+    const result = await pool.query(`UPDATE customers
+     SET preferred_language = $2,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE customer_number = $1
+     RETURNING customer_number, preferred_language`, [customer_number, preferred_language]);
+    await addAudit("set_preferred_language", { customer_number, preferred_language });
+    return { status: result.rows.length > 0 ? "UPDATED" : "NOT_FOUND", customer: result.rows[0] || null };
+};
+const manageAuthorizedUsersHandler = async ({ account_number, operation, user_email, role }) => {
+    if (operation === "list") {
+        const result = await pool.query(`SELECT user_email AS email, role, created_at AS "addedAt"
+       FROM authorized_users
+       WHERE account_number = $1
+       ORDER BY created_at DESC`, [account_number]);
+        return { accountNumber: account_number, authorizedUsers: result.rows };
+    }
+    if (operation === "add" && user_email) {
+        await pool.query(`INSERT INTO authorized_users (account_number, user_email, role)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (account_number, user_email)
+       DO UPDATE SET role = EXCLUDED.role`, [account_number, user_email, role || "viewer"]);
+    }
+    if (operation === "remove" && user_email) {
+        await pool.query(`DELETE FROM authorized_users
+       WHERE account_number = $1 AND user_email = $2`, [account_number, user_email]);
+    }
+    await addAudit("manage_authorized_users", { account_number, operation, user_email: user_email || null });
+    const result = await pool.query(`SELECT user_email AS email, role, created_at AS "addedAt"
+     FROM authorized_users
+     WHERE account_number = $1
+     ORDER BY created_at DESC`, [account_number]);
+    return { accountNumber: account_number, authorizedUsers: result.rows };
+};
+const setPaperlessBillingHandler = async ({ account_number, enabled }) => {
+    if (enabled) {
+        await pool.query(`INSERT INTO account_programs (account_number, program_name)
+       VALUES ($1, 'Paperless Billing')
+       ON CONFLICT (account_number, program_name)
+       DO NOTHING`, [account_number]);
+    }
+    else {
+        await pool.query(`DELETE FROM account_programs
+       WHERE account_number = $1 AND program_name = 'Paperless Billing'`, [account_number]);
+    }
+    await addAudit("set_paperless_billing", { account_number, enabled: Boolean(enabled) });
+    return { status: "UPDATED", accountNumber: account_number, paperlessBillingEnabled: Boolean(enabled) };
+};
+const getRatePlanOptionsHandler = async ({ account_number }) => {
+    const accountResult = await pool.query('SELECT rate_class FROM accounts WHERE account_number = $1', [account_number]);
+    const currentRate = accountResult.rows[0]?.rate_class || "RS-1 Residential Service";
+    return {
+        accountNumber: account_number,
+        currentRate,
+        options: [
+            { ratePlan: "RS-1 Residential Service", estimatedMonthlyDeltaUsd: 0 },
+            { ratePlan: "TOU-EV Off-Peak", estimatedMonthlyDeltaUsd: -18.5 },
+            { ratePlan: "Budget Billing", estimatedMonthlyDeltaUsd: 0, note: "Payment smoothing option" }
+        ]
+    };
+};
+const compareRatePlanSavingsHandler = async ({ account_number, candidate_rate }) => {
+    const usageResult = await pool.query(`SELECT AVG(kwh) AS avg_kwh, AVG(cost_usd) AS avg_cost
+     FROM usage_history
+     WHERE account_number = $1`, [account_number]);
+    const avgKwh = Number(usageResult.rows[0]?.avg_kwh || 0);
+    const avgCost = Number(usageResult.rows[0]?.avg_cost || 0);
+    const estimatedCost = candidate_rate === "TOU-EV Off-Peak" ? avgCost * 0.9 : avgCost;
+    return {
+        accountNumber: account_number,
+        candidateRate: candidate_rate,
+        averageMonthlyKwh: Number(avgKwh.toFixed(2)),
+        currentEstimatedMonthlyCostUsd: Number(avgCost.toFixed(2)),
+        candidateEstimatedMonthlyCostUsd: Number(estimatedCost.toFixed(2)),
+        projectedSavingsUsd: Number((avgCost - estimatedCost).toFixed(2))
+    };
+};
+const getPeakAlertsHandler = async ({ account_number }) => {
+    const usageResult = await pool.query(`SELECT month, kwh
+     FROM usage_history
+     WHERE account_number = $1
+     ORDER BY month DESC
+     LIMIT 3`, [account_number]);
+    const alerts = usageResult.rows
+        .filter((row) => Number(row.kwh) > 1200)
+        .map((row) => ({ month: row.month, type: "HIGH_USAGE", message: `Usage exceeded threshold with ${row.kwh} kWh.` }));
+    return {
+        accountNumber: account_number,
+        alerts,
+        hasAlerts: alerts.length > 0
+    };
+};
+const recommendEvChargingWindowHandler = async ({ account_number }) => {
+    const bill = await getBillingInquiryHandler({ account_number });
+    const offPeakRatio = bill.evChargingKwh ? Number(((bill.evOffPeakKwh / bill.evChargingKwh) * 100).toFixed(1)) : 0;
+    return {
+        accountNumber: account_number,
+        recommendedWindow: "22:00-06:00",
+        offPeakRatioPct: offPeakRatio,
+        recommendation: "Charge overnight to maximize off-peak savings and reduce on-peak usage."
+    };
+};
+const projectedNextBillHandler = async ({ account_number }) => {
+    const result = await pool.query(`SELECT cost_usd, kwh
+     FROM usage_history
+     WHERE account_number = $1
+     ORDER BY month DESC
+     LIMIT 3`, [account_number]);
+    if (result.rows.length === 0) {
+        return { found: false, message: "No usage history found for projection." };
+    }
+    const avgCost = result.rows.reduce((sum, row) => sum + Number(row.cost_usd || 0), 0) / result.rows.length;
+    const avgKwh = result.rows.reduce((sum, row) => sum + Number(row.kwh || 0), 0) / result.rows.length;
+    const projectedCost = avgCost * 1.05;
+    return {
+        accountNumber: account_number,
+        projectedNextBillUsd: Number(projectedCost.toFixed(2)),
+        projectedKwh: Number(avgKwh.toFixed(0)),
+        basis: "Rolling 3-month average with seasonal uplift."
+    };
+};
+const createSupportCaseHandler = async ({ account_number, category, subject, description, priority }) => {
+    const caseId = makeId("CASE");
+    await pool.query(`INSERT INTO support_cases
+      (case_id, account_number, category, subject, description, priority, status)
+     VALUES ($1, $2, $3, $4, $5, $6, 'OPEN')`, [caseId, account_number, category, subject, description, priority || "normal"]);
+    await addAudit("create_support_case", { account_number, caseId, category });
+    const supportCase = {
+        caseId,
+        accountNumber: account_number,
+        category,
+        subject,
+        description,
+        priority: priority || "normal",
+        status: "OPEN"
+    };
+    return supportCase;
+};
+const getCaseStatusHandler = async ({ case_id }) => {
+    const result = await pool.query('SELECT * FROM support_cases WHERE case_id = $1', [case_id]);
+    if (result.rows.length === 0) {
+        return { found: false, message: "Case not found." };
+    }
+    const supportCase = result.rows[0];
+    return {
+        caseId: supportCase.case_id,
+        accountNumber: supportCase.account_number,
+        category: supportCase.category,
+        subject: supportCase.subject,
+        description: supportCase.description,
+        priority: supportCase.priority,
+        status: supportCase.status,
+        createdAt: supportCase.created_at,
+        updatedAt: supportCase.updated_at
+    };
+};
+const verifyIdentityStepupHandler = async ({ customer_number, method }) => {
+    const sessionId = makeId("STEPUP");
+    await pool.query(`INSERT INTO verification_sessions
+      (session_id, customer_number, method, status, challenge_code_hint)
+     VALUES ($1, $2, $3, 'VERIFICATION_SENT', '***123')`, [sessionId, customer_number, method]);
+    await addAudit("verify_identity_stepup", { customer_number, method, sessionId });
+    const session = {
+        sessionId,
+        customerNumber: customer_number,
+        method,
+        status: "VERIFICATION_SENT",
+        challengeCodeHint: "***123"
+    };
+    return session;
+};
+const auditActivityLogHandler = async ({ account_number, customer_number, limit }) => {
+    const maxItems = Math.min(Math.max(Number(limit || 20), 1), 100);
+    const result = await pool.query(`SELECT id, action, account_number, customer_number, details, created_at
+     FROM audit_log
+     WHERE ($1::text = '' OR account_number = $1)
+       AND ($2::text = '' OR customer_number = $2)
+     ORDER BY created_at DESC
+     LIMIT $3`, [account_number || '', customer_number || '', maxItems]);
+    return result.rows.map((row) => ({
+        id: row.id,
+        action: row.action,
+        account_number: row.account_number,
+        customer_number: row.customer_number,
+        timestamp: row.created_at,
+        ...(row.details || {})
+    }));
+};
 const createFplMcpServer = () => {
     const server = new McpServer({
         name: "fpl-agent-mcp",
@@ -324,6 +1011,255 @@ const createFplMcpServer = () => {
             intent: z.enum(["keep_both", "move_out_miami"])
         }
     }, async (input) => jsonContent(await setMoveIntentHandler(input)));
+    server.registerTool("register_vehicle", {
+        description: "Register a new EV for a customer account.",
+        inputSchema: {
+            customer_number: z.string(),
+            linked_premise: z.string().optional(),
+            make: z.string(),
+            model: z.string(),
+            year: z.number().int().min(1990).max(2100),
+            connector_type: z.string(),
+            vehicle_id: z.string().optional()
+        }
+    }, async (input) => jsonContent(await registerVehicleHandler(input)));
+    server.registerTool("update_registered_vehicle", {
+        description: "Update an existing registered vehicle.",
+        inputSchema: {
+            vehicle_id: z.string(),
+            linked_premise: z.string().optional(),
+            make: z.string().optional(),
+            model: z.string().optional(),
+            year: z.number().int().min(1990).max(2100).optional(),
+            connector_type: z.string().optional()
+        }
+    }, async (input) => jsonContent(await updateRegisteredVehicleHandler(input)));
+    server.registerTool("remove_registered_vehicle", {
+        description: "Remove a registered vehicle by vehicle id.",
+        inputSchema: {
+            vehicle_id: z.string()
+        }
+    }, async (input) => jsonContent(await removeRegisteredVehicleHandler(input)));
+    server.registerTool("set_autopay", {
+        description: "Enable autopay for an account.",
+        inputSchema: {
+            account_number: z.string(),
+            payment_method: z.record(z.string(), z.any()).optional()
+        }
+    }, async (input) => jsonContent(await setAutopayHandler(input)));
+    server.registerTool("cancel_autopay", {
+        description: "Disable autopay for an account.",
+        inputSchema: {
+            account_number: z.string()
+        }
+    }, async (input) => jsonContent(await cancelAutopayHandler(input)));
+    server.registerTool("update_payment_method", {
+        description: "Update stored payment method metadata for an account.",
+        inputSchema: {
+            account_number: z.string(),
+            method_type: z.string(),
+            last4: z.string().optional(),
+            label: z.string().optional()
+        }
+    }, async (input) => jsonContent(await updatePaymentMethodHandler(input)));
+    server.registerTool("request_payment_extension", {
+        description: "Request and apply a payment extension for the latest bill.",
+        inputSchema: {
+            account_number: z.string(),
+            requested_due_date: z.string(),
+            reason: z.string().optional()
+        }
+    }, async (input) => jsonContent(await requestPaymentExtensionHandler(input)));
+    server.registerTool("get_disconnection_risk", {
+        description: "Get disconnection risk for an account based on standing and bill status.",
+        inputSchema: {
+            account_number: z.string()
+        }
+    }, async (input) => jsonContent(await getDisconnectionRiskHandler(input)));
+    server.registerTool("start_stop_transfer_service", {
+        description: "Create a start, stop, or transfer service order.",
+        inputSchema: {
+            action: z.enum(["start", "stop", "transfer"]),
+            account_number: z.string(),
+            from_premise: z.string().optional(),
+            to_premise: z.string().optional(),
+            effective_date: z.string().optional()
+        }
+    }, async (input) => jsonContent(await startStopTransferServiceHandler(input)));
+    server.registerTool("schedule_reconnect", {
+        description: "Schedule reconnect service order for an account.",
+        inputSchema: {
+            account_number: z.string(),
+            reconnect_date: z.string()
+        }
+    }, async (input) => jsonContent(await scheduleReconnectHandler(input)));
+    server.registerTool("update_service_start_date", {
+        description: "Update an existing service order start date.",
+        inputSchema: {
+            service_order_id: z.string(),
+            new_start_date: z.string()
+        }
+    }, async (input) => jsonContent(await updateServiceStartDateHandler(input)));
+    server.registerTool("get_service_orders", {
+        description: "Retrieve service orders, optionally filtered by account.",
+        inputSchema: {
+            account_number: z.string().optional()
+        }
+    }, async (input) => jsonContent(await getServiceOrdersHandler(input)));
+    server.registerTool("cancel_service_order", {
+        description: "Cancel a scheduled service order.",
+        inputSchema: {
+            service_order_id: z.string(),
+            reason: z.string().optional()
+        }
+    }, async (input) => jsonContent(await cancelServiceOrderHandler(input)));
+    server.registerTool("get_ev_charging_sessions", {
+        description: "Get derived EV charging session history.",
+        inputSchema: {
+            account_number: z.string(),
+            months: z.number().int().min(1).max(12).optional()
+        }
+    }, async (input) => jsonContent(await getEvChargingSessionsHandler(input)));
+    server.registerTool("update_ev_enrollment_plan", {
+        description: "Update EV enrollment plan type (full or equipment_only).",
+        inputSchema: {
+            account_number: z.string(),
+            install_type: z.enum(["full", "equipment_only"])
+        }
+    }, async (input) => jsonContent(await updateEvEnrollmentPlanHandler(input)));
+    server.registerTool("pause_ev_enrollment", {
+        description: "Pause EV enrollment for an account.",
+        inputSchema: {
+            account_number: z.string(),
+            reason: z.string().optional()
+        }
+    }, async (input) => jsonContent(await pauseEvEnrollmentHandler(input)));
+    server.registerTool("cancel_ev_enrollment", {
+        description: "Cancel EV enrollment for an account.",
+        inputSchema: {
+            account_number: z.string(),
+            reason: z.string().optional()
+        }
+    }, async (input) => jsonContent(await cancelEvEnrollmentHandler(input)));
+    server.registerTool("schedule_ev_assessment", {
+        description: "Schedule EV site assessment.",
+        inputSchema: {
+            premise_number: z.string(),
+            preferred_date: z.string().optional()
+        }
+    }, async (input) => jsonContent(await scheduleEvAssessmentHandler(input)));
+    server.registerTool("upload_garage_requirements_status", {
+        description: "Upload/record garage readiness status for EV installation.",
+        inputSchema: {
+            premise_number: z.string(),
+            photos_uploaded: z.boolean().optional(),
+            wifi_ready: z.boolean().optional(),
+            circuit_240v_ready: z.boolean().optional(),
+            notes: z.string().optional()
+        }
+    }, async (input) => jsonContent(await uploadGarageRequirementsStatusHandler(input)));
+    server.registerTool("update_contact_info", {
+        description: "Update customer contact info.",
+        inputSchema: {
+            customer_number: z.string(),
+            email: z.string().optional(),
+            mobile_phone: z.string().optional()
+        }
+    }, async (input) => jsonContent(await updateContactInfoHandler(input)));
+    server.registerTool("update_notification_preferences", {
+        description: "Update customer notification preferences.",
+        inputSchema: {
+            customer_number: z.string(),
+            billing_channel: z.enum(["sms", "email", "both"]).optional(),
+            outage_channel: z.enum(["sms", "email", "both"]).optional(),
+            marketing_opt_in: z.boolean().optional()
+        }
+    }, async (input) => jsonContent(await updateNotificationPreferencesHandler(input)));
+    server.registerTool("set_preferred_language", {
+        description: "Set preferred language for a customer.",
+        inputSchema: {
+            customer_number: z.string(),
+            preferred_language: z.string()
+        }
+    }, async (input) => jsonContent(await setPreferredLanguageHandler(input)));
+    server.registerTool("manage_authorized_users", {
+        description: "Add/remove/list authorized users for an account.",
+        inputSchema: {
+            account_number: z.string(),
+            operation: z.enum(["add", "remove", "list"]),
+            user_email: z.string().optional(),
+            role: z.string().optional()
+        }
+    }, async (input) => jsonContent(await manageAuthorizedUsersHandler(input)));
+    server.registerTool("set_paperless_billing", {
+        description: "Enable or disable paperless billing program.",
+        inputSchema: {
+            account_number: z.string(),
+            enabled: z.boolean()
+        }
+    }, async (input) => jsonContent(await setPaperlessBillingHandler(input)));
+    server.registerTool("get_rate_plan_options", {
+        description: "Get available rate plan options for account.",
+        inputSchema: {
+            account_number: z.string()
+        }
+    }, async (input) => jsonContent(await getRatePlanOptionsHandler(input)));
+    server.registerTool("compare_rate_plan_savings", {
+        description: "Compare estimated savings for a candidate rate plan.",
+        inputSchema: {
+            account_number: z.string(),
+            candidate_rate: z.string()
+        }
+    }, async (input) => jsonContent(await compareRatePlanSavingsHandler(input)));
+    server.registerTool("get_peak_alerts", {
+        description: "Get account peak usage alerts.",
+        inputSchema: {
+            account_number: z.string()
+        }
+    }, async (input) => jsonContent(await getPeakAlertsHandler(input)));
+    server.registerTool("recommend_ev_charging_window", {
+        description: "Recommend EV charging window based on account behavior.",
+        inputSchema: {
+            account_number: z.string()
+        }
+    }, async (input) => jsonContent(await recommendEvChargingWindowHandler(input)));
+    server.registerTool("projected_next_bill", {
+        description: "Project next bill amount from recent usage.",
+        inputSchema: {
+            account_number: z.string()
+        }
+    }, async (input) => jsonContent(await projectedNextBillHandler(input)));
+    server.registerTool("create_support_case", {
+        description: "Create support case for an account issue.",
+        inputSchema: {
+            account_number: z.string(),
+            category: z.string(),
+            subject: z.string(),
+            description: z.string(),
+            priority: z.enum(["low", "normal", "high"]).optional()
+        }
+    }, async (input) => jsonContent(await createSupportCaseHandler(input)));
+    server.registerTool("get_case_status", {
+        description: "Get support case status by case id.",
+        inputSchema: {
+            case_id: z.string()
+        }
+    }, async (input) => jsonContent(await getCaseStatusHandler(input)));
+    server.registerTool("verify_identity_stepup", {
+        description: "Initiate step-up identity verification challenge.",
+        inputSchema: {
+            customer_number: z.string(),
+            method: z.enum(["sms", "email"])
+        }
+    }, async (input) => jsonContent(await verifyIdentityStepupHandler(input)));
+    server.registerTool("audit_activity_log", {
+        description: "Retrieve audited account/customer activity log.",
+        inputSchema: {
+            account_number: z.string().optional(),
+            customer_number: z.string().optional(),
+            limit: z.number().int().min(1).max(100).optional()
+        }
+    }, async (input) => jsonContent(await auditActivityLogHandler(input)));
     return server;
 };
 const readRequestBody = async (request) => {
@@ -334,7 +1270,12 @@ const readRequestBody = async (request) => {
     if (chunks.length === 0) {
         return undefined;
     }
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    const raw = Buffer.concat(chunks);
+    const contentType = request.headers["content-type"] ?? "";
+    if (contentType.includes("application/x-www-form-urlencoded")) {
+        return raw; // callers parse as URLSearchParams
+    }
+    return JSON.parse(raw.toString("utf8"));
 };
 const setCorsHeaders = (response) => {
     response.setHeader("Access-Control-Allow-Origin", "*");
@@ -441,7 +1382,8 @@ const handleMcpRequest = async (request, response) => {
             // Check if user has access to the requested customer data
             if (body.params.arguments?.customer_number) {
                 const customerNumber = body.params.arguments.customer_number;
-                if (typeof customerNumber === 'string' && !await hasCustomerAccess(decoded.userId, customerNumber)) {
+                const shouldEnforceCustomerAccess = userCustomerNumbers.length > 0;
+                if (shouldEnforceCustomerAccess && typeof customerNumber === 'string' && !await hasCustomerAccess(decoded.userId, customerNumber)) {
                     writeJson(response, 403, {
                         jsonrpc: "2.0",
                         error: {
@@ -509,7 +1451,40 @@ const handleMcpRequest = async (request, response) => {
                 { name: "get_service_connection_quote", description: "Return move-in connection quote, deposit status and earliest connection date for a premise.", inputSchema: { type: "object", properties: { premise_number: { type: "string" } }, required: ["premise_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
                 { name: "start_service_connection", description: "Submit a new residential power connection request.", inputSchema: { type: "object", properties: { premise_number: { type: "string" }, account_number: { type: "string" }, requested_connect_date: { type: "string" } }, required: ["premise_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
                 { name: "enroll_ev_charging", description: "Start FPL EVolution Home enrollment for a premise.", inputSchema: { type: "object", properties: { premise_number: { type: "string" }, install_type: { type: "string", enum: ["full", "equipment_only"] } }, required: ["premise_number", "install_type"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
-                { name: "set_move_intent", description: "Record whether the customer is keeping both homes or moving out of Miami.", inputSchema: { type: "object", properties: { intent: { type: "string", enum: ["keep_both", "move_out_miami"] } }, required: ["intent"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } }
+                { name: "set_move_intent", description: "Record whether the customer is keeping both homes or moving out of Miami.", inputSchema: { type: "object", properties: { intent: { type: "string", enum: ["keep_both", "move_out_miami"] } }, required: ["intent"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "register_vehicle", description: "Register a new EV for a customer account.", inputSchema: { type: "object", properties: { customer_number: { type: "string" }, linked_premise: { type: "string" }, make: { type: "string" }, model: { type: "string" }, year: { type: "number" }, connector_type: { type: "string" }, vehicle_id: { type: "string" } }, required: ["customer_number", "make", "model", "year", "connector_type"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "update_registered_vehicle", description: "Update an existing registered vehicle.", inputSchema: { type: "object", properties: { vehicle_id: { type: "string" }, linked_premise: { type: "string" }, make: { type: "string" }, model: { type: "string" }, year: { type: "number" }, connector_type: { type: "string" } }, required: ["vehicle_id"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "remove_registered_vehicle", description: "Remove a registered vehicle by vehicle id.", inputSchema: { type: "object", properties: { vehicle_id: { type: "string" } }, required: ["vehicle_id"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "set_autopay", description: "Enable autopay for an account.", inputSchema: { type: "object", properties: { account_number: { type: "string" }, payment_method: { type: "object" } }, required: ["account_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "cancel_autopay", description: "Disable autopay for an account.", inputSchema: { type: "object", properties: { account_number: { type: "string" } }, required: ["account_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "update_payment_method", description: "Update stored payment method metadata for an account.", inputSchema: { type: "object", properties: { account_number: { type: "string" }, method_type: { type: "string" }, last4: { type: "string" }, label: { type: "string" } }, required: ["account_number", "method_type"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "request_payment_extension", description: "Request and apply a payment extension for the latest bill.", inputSchema: { type: "object", properties: { account_number: { type: "string" }, requested_due_date: { type: "string" }, reason: { type: "string" } }, required: ["account_number", "requested_due_date"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "get_disconnection_risk", description: "Get disconnection risk for an account based on standing and bill status.", inputSchema: { type: "object", properties: { account_number: { type: "string" } }, required: ["account_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "start_stop_transfer_service", description: "Create a start, stop, or transfer service order.", inputSchema: { type: "object", properties: { action: { type: "string", enum: ["start", "stop", "transfer"] }, account_number: { type: "string" }, from_premise: { type: "string" }, to_premise: { type: "string" }, effective_date: { type: "string" } }, required: ["action", "account_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "schedule_reconnect", description: "Schedule reconnect service order for an account.", inputSchema: { type: "object", properties: { account_number: { type: "string" }, reconnect_date: { type: "string" } }, required: ["account_number", "reconnect_date"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "update_service_start_date", description: "Update an existing service order start date.", inputSchema: { type: "object", properties: { service_order_id: { type: "string" }, new_start_date: { type: "string" } }, required: ["service_order_id", "new_start_date"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "get_service_orders", description: "Retrieve service orders, optionally filtered by account.", inputSchema: { type: "object", properties: { account_number: { type: "string" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "cancel_service_order", description: "Cancel a scheduled service order.", inputSchema: { type: "object", properties: { service_order_id: { type: "string" }, reason: { type: "string" } }, required: ["service_order_id"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "get_ev_charging_sessions", description: "Get derived EV charging session history.", inputSchema: { type: "object", properties: { account_number: { type: "string" }, months: { type: "number" } }, required: ["account_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "update_ev_enrollment_plan", description: "Update EV enrollment plan type (full or equipment_only).", inputSchema: { type: "object", properties: { account_number: { type: "string" }, install_type: { type: "string", enum: ["full", "equipment_only"] } }, required: ["account_number", "install_type"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "pause_ev_enrollment", description: "Pause EV enrollment for an account.", inputSchema: { type: "object", properties: { account_number: { type: "string" }, reason: { type: "string" } }, required: ["account_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "cancel_ev_enrollment", description: "Cancel EV enrollment for an account.", inputSchema: { type: "object", properties: { account_number: { type: "string" }, reason: { type: "string" } }, required: ["account_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "schedule_ev_assessment", description: "Schedule EV site assessment.", inputSchema: { type: "object", properties: { premise_number: { type: "string" }, preferred_date: { type: "string" } }, required: ["premise_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "upload_garage_requirements_status", description: "Upload/record garage readiness status for EV installation.", inputSchema: { type: "object", properties: { premise_number: { type: "string" }, photos_uploaded: { type: "boolean" }, wifi_ready: { type: "boolean" }, circuit_240v_ready: { type: "boolean" }, notes: { type: "string" } }, required: ["premise_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "update_contact_info", description: "Update customer contact info.", inputSchema: { type: "object", properties: { customer_number: { type: "string" }, email: { type: "string" }, mobile_phone: { type: "string" } }, required: ["customer_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "update_notification_preferences", description: "Update customer notification preferences.", inputSchema: { type: "object", properties: { customer_number: { type: "string" }, billing_channel: { type: "string", enum: ["sms", "email", "both"] }, outage_channel: { type: "string", enum: ["sms", "email", "both"] }, marketing_opt_in: { type: "boolean" } }, required: ["customer_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "set_preferred_language", description: "Set preferred language for a customer.", inputSchema: { type: "object", properties: { customer_number: { type: "string" }, preferred_language: { type: "string" } }, required: ["customer_number", "preferred_language"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "manage_authorized_users", description: "Add/remove/list authorized users for an account.", inputSchema: { type: "object", properties: { account_number: { type: "string" }, operation: { type: "string", enum: ["add", "remove", "list"] }, user_email: { type: "string" }, role: { type: "string" } }, required: ["account_number", "operation"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "set_paperless_billing", description: "Enable or disable paperless billing program.", inputSchema: { type: "object", properties: { account_number: { type: "string" }, enabled: { type: "boolean" } }, required: ["account_number", "enabled"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "get_rate_plan_options", description: "Get available rate plan options for account.", inputSchema: { type: "object", properties: { account_number: { type: "string" } }, required: ["account_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "compare_rate_plan_savings", description: "Compare estimated savings for a candidate rate plan.", inputSchema: { type: "object", properties: { account_number: { type: "string" }, candidate_rate: { type: "string" } }, required: ["account_number", "candidate_rate"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "get_peak_alerts", description: "Get account peak usage alerts.", inputSchema: { type: "object", properties: { account_number: { type: "string" } }, required: ["account_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "recommend_ev_charging_window", description: "Recommend EV charging window based on account behavior.", inputSchema: { type: "object", properties: { account_number: { type: "string" } }, required: ["account_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "projected_next_bill", description: "Project next bill amount from recent usage.", inputSchema: { type: "object", properties: { account_number: { type: "string" } }, required: ["account_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "create_support_case", description: "Create support case for an account issue.", inputSchema: { type: "object", properties: { account_number: { type: "string" }, category: { type: "string" }, subject: { type: "string" }, description: { type: "string" }, priority: { type: "string", enum: ["low", "normal", "high"] } }, required: ["account_number", "category", "subject", "description"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "get_case_status", description: "Get support case status by case id.", inputSchema: { type: "object", properties: { case_id: { type: "string" } }, required: ["case_id"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "verify_identity_stepup", description: "Initiate step-up identity verification challenge.", inputSchema: { type: "object", properties: { customer_number: { type: "string" }, method: { type: "string", enum: ["sms", "email"] } }, required: ["customer_number", "method"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "audit_activity_log", description: "Retrieve audited account/customer activity log.", inputSchema: { type: "object", properties: { account_number: { type: "string" }, customer_number: { type: "string" }, limit: { type: "number" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } }
             ];
             const toolsResponse = {
                 jsonrpc: "2.0",
@@ -564,6 +1539,173 @@ const handleMcpRequest = async (request, response) => {
         await server.close();
     }
 };
+const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID ?? "chatgpt";
+const OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET ?? "";
+const JWT_SECRET_VALUE = process.env.JWT_SECRET ?? "change-me";
+const oauthLoginPageHtml = (params, error) => `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FPL Agent – Sign In</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:system-ui,sans-serif;background:#f0f4f8;display:flex;align-items:center;justify-content:center;min-height:100vh}
+    .card{background:#fff;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.1);padding:40px;width:100%;max-width:400px}
+    .logo{font-size:22px;font-weight:700;color:#0050a0;margin-bottom:8px}
+    .subtitle{color:#666;font-size:14px;margin-bottom:28px}
+    label{display:block;font-size:13px;font-weight:600;color:#333;margin-bottom:6px}
+    input{width:100%;padding:10px 14px;border:1px solid #d0d7de;border-radius:8px;font-size:15px;margin-bottom:18px;outline:none;transition:border .2s}
+    input:focus{border-color:#0050a0}
+    button{width:100%;padding:12px;background:#0050a0;color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer}
+    button:hover{background:#003d7a}
+    .error{background:#fff0f0;border:1px solid #f88;color:#c00;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:18px}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">⚡ FPL Agent</div>
+    <div class="subtitle">Sign in to connect your FPL account to ChatGPT</div>
+    ${error ? `<div class="error">${error}</div>` : ""}
+    <form method="POST" action="/oauth/authorize?${params}">
+      <label for="email">Email</label>
+      <input type="email" id="email" name="email" required autocomplete="username" placeholder="your@email.com">
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" required autocomplete="current-password" placeholder="••••••••">
+      <button type="submit">Sign In &amp; Authorize</button>
+    </form>
+  </div>
+</body>
+</html>`;
+const handleOAuthAuthorize = async (request, response, url) => {
+    const clientId = url.searchParams.get("client_id");
+    const redirectUri = url.searchParams.get("redirect_uri") ?? "";
+    const state = url.searchParams.get("state") ?? "";
+    const responseType = url.searchParams.get("response_type");
+    const params = url.searchParams.toString();
+    if (clientId !== OAUTH_CLIENT_ID || responseType !== "code") {
+        writeHtml(response, 400, oauthLoginPageHtml(params, "Invalid client or response_type."));
+        return;
+    }
+    if (request.method === "GET") {
+        writeHtml(response, 200, oauthLoginPageHtml(params));
+        return;
+    }
+    // POST – process login form
+    const body = await readRequestBody(request);
+    const formText = Buffer.isBuffer(body) ? body.toString() : JSON.stringify(body);
+    const formParams = new URLSearchParams(formText);
+    const email = formParams.get("email")?.toLowerCase() ?? "";
+    const password = formParams.get("password") ?? "";
+    if (!email || !password) {
+        writeHtml(response, 400, oauthLoginPageHtml(params, "Email and password are required."));
+        return;
+    }
+    // Validate credentials against users table
+    const bcrypt = await import("bcrypt");
+    const userResult = await pool.query("SELECT id, email, password_hash, is_active FROM users WHERE email = $1", [email]);
+    if (userResult.rows.length === 0) {
+        writeHtml(response, 401, oauthLoginPageHtml(params, "Invalid email or password."));
+        return;
+    }
+    const user = userResult.rows[0];
+    if (!user.is_active) {
+        writeHtml(response, 401, oauthLoginPageHtml(params, "Account is deactivated."));
+        return;
+    }
+    const valid = await bcrypt.compare(password, user.password_hash);
+    if (!valid) {
+        writeHtml(response, 401, oauthLoginPageHtml(params, "Invalid email or password."));
+        return;
+    }
+    // Issue authorization code (10 min TTL)
+    const code = makeId("CODE") + "-" + Math.random().toString(36).slice(2);
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    await pool.query(`INSERT INTO oauth_codes (code, user_id, email, redirect_uri, expires_at)
+     VALUES ($1, $2, $3, $4, $5)`, [code, user.id, user.email, redirectUri, expiresAt]);
+    const redirectUrl = new URL(redirectUri);
+    redirectUrl.searchParams.set("code", code);
+    if (state)
+        redirectUrl.searchParams.set("state", state);
+    setCorsHeaders(response);
+    response.writeHead(302, { Location: redirectUrl.toString() });
+    response.end();
+};
+const handleOAuthToken = async (request, response) => {
+    setCorsHeaders(response);
+    if (request.method === "OPTIONS") {
+        response.writeHead(204);
+        response.end();
+        return;
+    }
+    const raw = await readRequestBody(request);
+    let grantType, code, redirectUri, clientId, clientSecret;
+    // Support both JSON and form-urlencoded bodies
+    const contentType = request.headers["content-type"] ?? "";
+    if (contentType.includes("application/x-www-form-urlencoded")) {
+        const p = new URLSearchParams(Buffer.isBuffer(raw) ? raw.toString() : JSON.stringify(raw));
+        grantType = p.get("grant_type") ?? "";
+        code = p.get("code") ?? "";
+        redirectUri = p.get("redirect_uri") ?? "";
+        clientId = p.get("client_id") ?? "";
+        clientSecret = p.get("client_secret") ?? "";
+    }
+    else {
+        const b = raw;
+        grantType = b.grant_type ?? "";
+        code = b.code ?? "";
+        redirectUri = b.redirect_uri ?? "";
+        clientId = b.client_id ?? "";
+        clientSecret = b.client_secret ?? "";
+    }
+    // Also check Authorization header for client credentials
+    const authHeader = request.headers.authorization ?? "";
+    if (authHeader.startsWith("Basic ")) {
+        const decoded = Buffer.from(authHeader.slice(6), "base64").toString();
+        const [hId, hSecret] = decoded.split(":");
+        if (!clientId)
+            clientId = hId;
+        if (!clientSecret)
+            clientSecret = hSecret;
+    }
+    if (clientId !== OAUTH_CLIENT_ID || clientSecret !== OAUTH_CLIENT_SECRET) {
+        writeJson(response, 401, { error: "invalid_client" });
+        return;
+    }
+    if (grantType !== "authorization_code") {
+        writeJson(response, 400, { error: "unsupported_grant_type" });
+        return;
+    }
+    const codeResult = await pool.query(`SELECT user_id, email, redirect_uri, expires_at, used
+     FROM oauth_codes WHERE code = $1`, [code]);
+    if (codeResult.rows.length === 0) {
+        writeJson(response, 400, { error: "invalid_grant", error_description: "Code not found." });
+        return;
+    }
+    const row = codeResult.rows[0];
+    if (row.used) {
+        writeJson(response, 400, { error: "invalid_grant", error_description: "Code already used." });
+        return;
+    }
+    if (new Date(row.expires_at) < new Date()) {
+        writeJson(response, 400, { error: "invalid_grant", error_description: "Code expired." });
+        return;
+    }
+    if (row.redirect_uri !== redirectUri) {
+        writeJson(response, 400, { error: "invalid_grant", error_description: "redirect_uri mismatch." });
+        return;
+    }
+    // Mark code used
+    await pool.query("UPDATE oauth_codes SET used = TRUE WHERE code = $1", [code]);
+    // Issue access token (1 year JWT so ChatGPT stays connected)
+    const jwt = await import("jsonwebtoken");
+    const accessToken = jwt.default.sign({ userId: row.user_id, email: row.email }, JWT_SECRET_VALUE, { expiresIn: "1y" });
+    writeJson(response, 200, {
+        access_token: accessToken,
+        token_type: "Bearer",
+        expires_in: 31536000
+    });
+};
 const startHttpServer = () => {
     const port = Number(process.env.PORT ?? 3000);
     createServer(async (request, response) => {
@@ -574,6 +1716,14 @@ const startHttpServer = () => {
         }
         if (url.pathname === "/privacy") {
             writeHtml(response, 200, privacyPageHtml);
+            return;
+        }
+        if (url.pathname === "/oauth/authorize") {
+            await handleOAuthAuthorize(request, response, url);
+            return;
+        }
+        if (url.pathname === "/oauth/token") {
+            await handleOAuthToken(request, response);
             return;
         }
         if (url.pathname === "/mcp") {
@@ -590,6 +1740,7 @@ const startStdioServer = async () => {
     const transport = new StdioServerTransport();
     await server.connect(transport);
 };
+await ensurePersistenceTables();
 if (process.env.MCP_TRANSPORT === "http" || process.env.PORT) {
     startHttpServer();
 }
