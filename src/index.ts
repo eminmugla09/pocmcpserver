@@ -2501,9 +2501,7 @@ const handleOAuthRegister = async (request: IncomingMessage, response: ServerRes
     ? body.token_endpoint_auth_method
     : "none";
   const clientId = generateClientId();
-  const clientSecret = tokenEndpointAuthMethod === "none"
-    ? null
-    : generateRefreshToken();
+  const clientSecret = generateRefreshToken();
   const clientName = typeof body.client_name === "string" ? body.client_name : "MCP Client";
   const grantTypes = Array.isArray(body.grant_types)
     ? body.grant_types.filter((value): value is string => typeof value === "string")
