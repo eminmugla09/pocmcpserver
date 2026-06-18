@@ -1539,7 +1539,7 @@ const handleMcpRequest = async (request, response) => {
         await server.close();
     }
 };
-const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID ?? "chatgpt";
+const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID ?? "chatgpt-fpl-agent";
 const OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET ?? "";
 const JWT_SECRET_VALUE = process.env.JWT_SECRET ?? "change-me";
 const oauthLoginPageHtml = (params, error) => `<!DOCTYPE html>
