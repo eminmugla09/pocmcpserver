@@ -133,6 +133,83 @@ const findAccounts = async (input: {
 };
 
 // Tool handler functions for direct invocation
+const getMyAccountOverviewHandler = async (userId: string, email: string) => {
+  // Get customer from user_customers link
+  const ucResult = await pool.query(
+    `SELECT uc.customer_number, uc.is_primary, a.account_number, a.premise_number, a.status, a.standing, a.rate_class, a.past_due_flag, a.smart_meter_flag, a.service_address_line1, a.service_address_city, a.service_address_state, a.service_address_zip
+     FROM user_customers uc
+     INNER JOIN accounts a ON a.customer_number = uc.customer_number
+     WHERE uc.user_id = $1
+     ORDER BY uc.is_primary DESC, a.account_number ASC`,
+    [userId]
+  );
+
+  if (ucResult.rows.length === 0) {
+    return { found: false, message: "No linked accounts found for this user." };
+  }
+
+  const primaryAccount = ucResult.rows[0];
+  const accountNumber = primaryAccount.account_number;
+
+  // Get customer profile
+  const customerResult = await pool.query(
+    'SELECT customer_number, first_name, last_name, full_name, email, mobile_phone, preferred_language FROM customers WHERE customer_number = $1',
+    [primaryAccount.customer_number]
+  );
+  const customer = customerResult.rows[0] || {};
+
+  // Get latest billing
+  const billingResult = await pool.query(
+    'SELECT * FROM billing WHERE account_number = $1 ORDER BY bill_date DESC LIMIT 1',
+    [accountNumber]
+  );
+  const billing = billingResult.rows[0];
+
+  let billingInfo: any = null;
+  if (billing) {
+    const chargesResult = await pool.query(
+      'SELECT * FROM bill_charges WHERE billing_id = $1',
+      [billing.id]
+    );
+    billingInfo = {
+      invoiceId: billing.invoice_id,
+      billDate: billing.bill_date,
+      dueDate: billing.due_date,
+      amountDue: billing.amount_due,
+      billingPeriod: `${billing.billing_period_start} to ${billing.billing_period_end}`,
+      kwhUsed: billing.kwh_used,
+      averageDailyKwh: billing.average_daily_kwh,
+      averageDailyCostUsd: billing.average_daily_cost_usd,
+      charges: chargesResult.rows,
+      evChargingKwh: billing.ev_charging_kwh,
+      evOffPeakKwh: billing.ev_off_peak_kwh,
+      estimatedEvOffPeakSavingsUsd: billing.estimated_ev_off_peak_savings_usd
+    };
+  }
+
+  return {
+    found: true,
+    customer: {
+      customerNumber: primaryAccount.customer_number,
+      fullName: customer.full_name,
+      email: customer.email,
+      mobilePhone: customer.mobile_phone
+    },
+    account: {
+      accountNumber,
+      premiseNumber: primaryAccount.premise_number,
+      status: primaryAccount.status,
+      standing: primaryAccount.standing,
+      rateClass: primaryAccount.rate_class,
+      pastDueFlag: primaryAccount.past_due_flag,
+      smartMeterFlag: primaryAccount.smart_meter_flag,
+      serviceAddress: `${primaryAccount.service_address_line1}, ${primaryAccount.service_address_city}, ${primaryAccount.service_address_state} ${primaryAccount.service_address_zip}`
+    },
+    billing: billingInfo,
+    allAccounts: ucResult.rows.map((r: any) => r.account_number)
+  };
+};
+
 const getCustomerProfileHandler = async (args: any) => {
   const { customer_number, phone, email } = args;
   const matches = await findMatchingCustomers({ customer_number, phone, email });
@@ -2168,6 +2245,24 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
           return;
         }
       }
+
+      // Intercept get_my_account_overview - handle directly with userId from JWT
+      if (toolName === "get_my_account_overview") {
+        logEvent("info", "mcp.tool.get_my_account_overview", { requestId, userEmail: decoded.email, userId: decoded.userId });
+        const overviewResult = await getMyAccountOverviewHandler(decoded.userId, decoded.email || "");
+        const mcpResponse = {
+          jsonrpc: "2.0",
+          id: body.id,
+          result: {
+            content: [{ type: "text", text: JSON.stringify(overviewResult) }]
+          }
+        };
+        setCorsHeaders(response);
+        response.writeHead(200, { "Content-Type": "text/event-stream" });
+        response.write(`event: message\ndata: ${JSON.stringify(mcpResponse)}\n\n`);
+        response.end();
+        return;
+      }
     } catch (error) {
       logMcpError(401, -32001, "Invalid or expired token.");
       writeJson(response, 401, {
@@ -2214,6 +2309,7 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
       // Create a mock stdio transport to get the tools list
       // We'll use the server's internal method to get tools
       const tools = [
+        { name: "get_my_account_overview", description: "Get your complete account overview including customer profile, account status, current bill breakdown, and EV details. No parameters needed - everything is automatically resolved from your login. USE THIS FIRST for any billing, account, or profile question.", inputSchema: { type: "object", properties: {}, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "get_customer_profile", description: "Identify the customer and return linked accounts, premises and registered EVs.", inputSchema: { type: "object", properties: { customer_number: { type: "string" }, phone: { type: "string" }, email: { type: "string" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "lookup_account", description: "Resolve residential account records by account, customer, phone, email, premise, or address.", inputSchema: { type: "object", properties: { account_number: { type: "string" }, customer_number: { type: "string" }, phone: { type: "string" }, email: { type: "string" }, premise_number: { type: "string" }, address: { type: "string" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "get_account_summary", description: "Return account status, standing, rate class, smart meter status, enrolled programs and flags. account_number is auto-resolved from your login if omitted.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
