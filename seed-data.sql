@@ -26,7 +26,7 @@ END $$;
 -- Insert customers
 INSERT INTO customers (customer_number, business_partner_id, first_name, last_name, full_name, email, mobile_phone, preferred_contact_method, preferred_language, customer_since, account_standing_flag)
 VALUES 
-  ('1009988776', '1009988776', 'Emin', 'Mugla', 'Emin Mugla', 'woarzus@gmail.com', '305-555-0142', 'Mobile', 'EN', '2018-03-09', 'GOOD'),
+  ('1009988776', '1009988776', 'Emin', 'Mugla', 'Emin Mugla', 'woarzus@gmail.com', '954-666-2333', 'Mobile', 'EN', '2018-03-09', 'GOOD'),
   ('2009988777', '2009988777', 'Ricardo', 'Vargas', 'Ricardo Vargas', 'rjvargas87@gmail.com', '978-430-9223', 'Email', 'EN', '2020-07-15', 'GOOD')
 ON CONFLICT (customer_number) DO NOTHING;
 

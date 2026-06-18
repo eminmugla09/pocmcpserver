@@ -4,6 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import pg from "pg";
+import { verifyToken, getUserCustomerNumbers, hasCustomerAccess } from "./auth.js";
 const { Pool } = pg;
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
@@ -408,6 +409,63 @@ const handleMcpRequest = async (request, response) => {
         request.headers.accept = "application/json, text/event-stream";
     }
     const body = await readRequestBody(request);
+    // Verify JWT token for tool calls (except initialize and tools/list)
+    if (body?.method === "tools/call" && body.params?.name) {
+        const authHeader = request.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            writeJson(response, 401, {
+                jsonrpc: "2.0",
+                error: {
+                    code: -32001,
+                    message: "Authentication required. Provide a valid JWT token in the Authorization header."
+                },
+                id: body.id
+            });
+            return;
+        }
+        const token = authHeader.substring(7);
+        try {
+            const decoded = verifyToken(token);
+            if (!decoded.userId) {
+                writeJson(response, 401, {
+                    jsonrpc: "2.0",
+                    error: {
+                        code: -32001,
+                        message: "Invalid token format."
+                    },
+                    id: body.id
+                });
+                return;
+            }
+            const userCustomerNumbers = await getUserCustomerNumbers(decoded.userId);
+            // Check if user has access to the requested customer data
+            if (body.params.arguments?.customer_number) {
+                const customerNumber = body.params.arguments.customer_number;
+                if (typeof customerNumber === 'string' && !await hasCustomerAccess(decoded.userId, customerNumber)) {
+                    writeJson(response, 403, {
+                        jsonrpc: "2.0",
+                        error: {
+                            code: -32002,
+                            message: "Access denied. You don't have permission to access this customer's data."
+                        },
+                        id: body.id
+                    });
+                    return;
+                }
+            }
+        }
+        catch (error) {
+            writeJson(response, 401, {
+                jsonrpc: "2.0",
+                error: {
+                    code: -32001,
+                    message: "Invalid or expired token."
+                },
+                id: body.id
+            });
+            return;
+        }
+    }
     // Handle initialize
     if (body?.method === "initialize") {
         const initResponse = {
