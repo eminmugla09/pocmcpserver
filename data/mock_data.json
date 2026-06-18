@@ -1,33 +1,6 @@
 {
   "_README": "100% SAMPLE DATA. No real FPL customer information. All names, addresses, account/premise/business-partner numbers, phone numbers, emails, EV details and dollar amounts are invented. Safe to use on a personal machine / personal ChatGPT account. Field names mirror the real SAP /ev, /tmd, and billusage xAPIs so the MCP responses look authentic.",
 
-  "customer": {
-    "customerNumber": "1009988776",
-    "businessPartnerId": "1009988776",
-    "firstName": "Emin",
-    "lastName": "Mugla",
-    "fullName": "Emin Mugla",
-    "email": "woarzus@gmail.com",
-    "mobilePhone": "305-555-0142",
-    "preferredContactMethod": "Mobile",
-    "preferredLanguage": "EN",
-    "customerSince": "2018-03-09",
-    "accountStandingFlag": "GOOD",
-    "linkedAccounts": ["5210099001"],
-    "linkedPremises": ["60412233", "60587744"],
-    "registeredVehicles": [
-      {
-        "vehicleId": "EVREG-7781",
-        "make": "Tesla",
-        "model": "Model Y",
-        "year": 2024,
-        "connectorType": "J1772 (with adapter)",
-        "registeredDate": "2024-08-02",
-        "linkedPremise": "60412233"
-      }
-    ]
-  },
-
   "customers": [
     {
       "customerNumber": "1009988776",
@@ -36,7 +9,7 @@
       "lastName": "Mugla",
       "fullName": "Emin Mugla",
       "email": "woarzus@gmail.com",
-      "mobilePhone": "305-555-0142",
+      "mobilePhone": "954-666-2333",
       "preferredContactMethod": "Mobile",
       "preferredLanguage": "EN",
       "customerSince": "2018-03-09",
@@ -56,28 +29,28 @@
       ]
     },
     {
-      "customerNumber": "1008877665",
-      "businessPartnerId": "1008877665",
+      "customerNumber": "2009988777",
+      "businessPartnerId": "2009988777",
       "firstName": "Ricardo",
       "lastName": "Vargas",
       "fullName": "Ricardo Vargas",
-      "email": "ricardo.vargas@gmail.com",
-      "mobilePhone": "786-555-0179",
+      "email": "rjvargas87@gmail.com",
+      "mobilePhone": "978-430-9223",
       "preferredContactMethod": "Email",
       "preferredLanguage": "EN",
-      "customerSince": "2021-09-14",
+      "customerSince": "2020-07-15",
       "accountStandingFlag": "GOOD",
-      "linkedAccounts": ["5210099222"],
-      "linkedPremises": ["60770011"],
+      "linkedAccounts": ["5220099002"],
+      "linkedPremises": ["70412255"],
       "registeredVehicles": [
         {
-          "vehicleId": "EVREG-9902",
+          "vehicleId": "EVREG-8892",
           "make": "Ford",
           "model": "Mustang Mach-E",
           "year": 2023,
-          "connectorType": "J1772",
-          "registeredDate": "2025-11-10",
-          "linkedPremise": "60770011"
+          "connectorType": "CCS",
+          "registeredDate": "2023-11-15",
+          "linkedPremise": "70412255"
         }
       ]
     }
@@ -107,11 +80,11 @@
         "zip": "33131"
       }
     },
-    "5210099222": {
-      "accountNumber": "5210099222",
-      "contractAccountId": "5210099222",
-      "customerNumber": "1008877665",
-      "premiseNumber": "60770011",
+    "5220099002": {
+      "accountNumber": "5220099002",
+      "contractAccountId": "5220099002",
+      "customerNumber": "2009988777",
+      "premiseNumber": "70412255",
       "accountType": "Residential",
       "rateClass": "RS-1 Residential Service",
       "status": "Active",
@@ -124,10 +97,10 @@
       "budgetBillingFlag": false,
       "enrolledPrograms": ["Paperless Billing", "Energy Dashboard"],
       "serviceAddress": {
-        "line1": "2401 NW 33rd Ave",
+        "line1": "789 Ocean Dr, Apt 305",
         "city": "Fort Lauderdale",
         "state": "FL",
-        "zip": "33311"
+        "zip": "33316"
       }
     }
   },
@@ -168,19 +141,19 @@
       "strongWifiAtChargingLocation": true,
       "existing240vCircuitInGarage": false
     },
-    "60770011": {
-      "premiseNumber": "60770011",
+    "70412255": {
+      "premiseNumber": "70412255",
       "address": {
-        "line1": "2401 NW 33rd Ave",
+        "line1": "789 Ocean Dr, Apt 305",
         "city": "Fort Lauderdale",
         "state": "FL",
-        "zip": "33311"
+        "zip": "33316"
       },
-      "propertyType": "Single-family home",
+      "propertyType": "Condominium with parking garage",
       "serviceStatus": "Active - Ricardo Vargas",
-      "activeAccountNumber": "5210099222",
+      "activeAccountNumber": "5220099002",
       "smartMeterFlag": true,
-      "meterInstallationNumber": "4100991122",
+      "meterInstallationNumber": "4100998811",
       "evolutionHomeEligible": true,
       "evolutionHomeEnrolled": false
     }
@@ -221,6 +194,23 @@
       "recommendedInstallType": "Full installation ($36/mo) - garage has no existing 240V circuit",
       "alternateInstallType": "Equipment-only ($27/mo) - only if a 240V circuit is added first",
       "notes": "Eligibility for EVolution Home requires an active residential account in good standing. Establish power service at 320 Anchorage Dr first, then EV enrollment can proceed."
+    },
+    "70412255": {
+      "premiseNumber": "70412255",
+      "eligible": false,
+      "checks": {
+        "ownsSingleFamilyOrTownhouseWithAttachedGarage": false,
+        "strongWifiAtChargingLocation": true,
+        "activeResidentialAccountInGoodStanding": "Yes - account in good standing",
+        "noPastDueOrPaymentExtension": true,
+        "notBusinessOrTaxExempt": true,
+        "smartMeterPresent": true,
+        "noPendingConnectDisconnectOrder": true,
+        "has240vCircuitInGarage": false
+      },
+      "recommendedInstallType": null,
+      "alternateInstallType": null,
+      "notes": "Condominium parking garage does not qualify for EVolution Home program. Must be single-family home or townhouse with attached garage."
     }
   },
 
@@ -255,34 +245,34 @@
       "nextScheduledPaymentDate": "2026-06-18",
       "nextScheduledPaymentAmountUsd": 168.74
     },
-    "5210099222": {
-      "accountNumber": "5210099222",
+    "5220099002": {
+      "accountNumber": "5220099002",
       "currentBill": {
-        "invoiceId": "INV-20260529-8891",
-        "billDate": "2026-05-29",
-        "dueDate": "2026-06-20",
-        "amountDue": 124.37,
-        "billingPeriod": "2026-04-28 to 2026-05-28",
-        "kwhUsed": 842,
-        "averageDailyKwh": 28.1,
-        "averageDailyCostUsd": 4.14,
-        "comparedToLastMonthPct": -2.3,
-        "comparedToLastYearPct": 4.9,
+        "invoiceId": "INV-20260528-5522",
+        "billDate": "2026-05-28",
+        "dueDate": "2026-06-18",
+        "amountDue": 145.32,
+        "billingPeriod": "2026-04-27 to 2026-05-27",
+        "kwhUsed": 987,
+        "averageDailyKwh": 32.9,
+        "averageDailyCostUsd": 4.84,
+        "comparedToLastMonthPct": -2.1,
+        "comparedToLastYearPct": 1.8,
         "charges": [
           {"description": "Base charge", "amountUsd": 9.10},
-          {"description": "Non-fuel energy (842 kWh)", "amountUsd": 68.24},
-          {"description": "Fuel charge", "amountUsd": 24.90},
-          {"description": "Taxes & fees", "amountUsd": 22.13}
+          {"description": "Non-fuel energy (987 kWh)", "amountUsd": 79.22},
+          {"description": "Fuel charge", "amountUsd": 28.65},
+          {"description": "Taxes & fees", "amountUsd": -1.65}
         ],
-        "evChargingKwh": 94,
-        "evOffPeakKwh": 80,
-        "evOnPeakKwh": 14,
-        "estimatedEvOffPeakSavingsUsd": 7.95
+        "evChargingKwh": 0,
+        "evOffPeakKwh": 0,
+        "evOnPeakKwh": 0,
+        "estimatedEvOffPeakSavingsUsd": 0.00
       },
       "paymentStatus": "Current - no balance past due",
       "autopayEnrolled": false,
-      "nextScheduledPaymentDate": "2026-06-20",
-      "nextScheduledPaymentAmountUsd": 124.37
+      "nextScheduledPaymentDate": "2026-06-18",
+      "nextScheduledPaymentAmountUsd": 145.32
     }
   },
 
@@ -293,11 +283,11 @@
       {"paymentDate": "2026-03-18", "amountUsd": 188.31, "method": "AutoPay - Bank (ACH)", "confirmation": "PMT-543774", "status": "Posted"},
       {"paymentDate": "2026-02-18", "amountUsd": 201.45, "method": "AutoPay - Bank (ACH)", "confirmation": "PMT-536910", "status": "Posted"}
     ],
-    "5210099222": [
-      {"paymentDate": "2026-05-22", "amountUsd": 118.41, "method": "Credit Card", "confirmation": "PMT-662731", "status": "Posted"},
-      {"paymentDate": "2026-04-22", "amountUsd": 121.08, "method": "Credit Card", "confirmation": "PMT-655229", "status": "Posted"},
-      {"paymentDate": "2026-03-22", "amountUsd": 126.77, "method": "Credit Card", "confirmation": "PMT-648903", "status": "Posted"},
-      {"paymentDate": "2026-02-22", "amountUsd": 132.54, "method": "Credit Card", "confirmation": "PMT-641772", "status": "Posted"}
+    "5220099002": [
+      {"paymentDate": "2026-05-15", "amountUsd": 138.45, "method": "Credit Card", "confirmation": "PMT-662345", "status": "Posted"},
+      {"paymentDate": "2026-04-15", "amountUsd": 142.88, "method": "Credit Card", "confirmation": "PMT-655234", "status": "Posted"},
+      {"paymentDate": "2026-03-15", "amountUsd": 156.23, "method": "Credit Card", "confirmation": "PMT-648123", "status": "Posted"},
+      {"paymentDate": "2026-02-15", "amountUsd": 149.67, "method": "Credit Card", "confirmation": "PMT-641012", "status": "Posted"}
     ]
   },
 
@@ -308,11 +298,11 @@
       {"month": "2026-03", "kwh": 1264, "costUsd": 188.31, "evChargingKwh": 318},
       {"month": "2026-02", "kwh": 1351, "costUsd": 201.45, "evChargingKwh": 295}
     ],
-    "5210099222": [
-      {"month": "2026-05", "kwh": 842, "costUsd": 124.37, "evChargingKwh": 94},
-      {"month": "2026-04", "kwh": 861, "costUsd": 121.08, "evChargingKwh": 88},
-      {"month": "2026-03", "kwh": 903, "costUsd": 126.77, "evChargingKwh": 101},
-      {"month": "2026-02", "kwh": 947, "costUsd": 132.54, "evChargingKwh": 110}
+    "5220099002": [
+      {"month": "2026-05", "kwh": 987, "costUsd": 145.32, "evChargingKwh": 0},
+      {"month": "2026-04", "kwh": 1023, "costUsd": 142.88, "evChargingKwh": 0},
+      {"month": "2026-03", "kwh": 1108, "costUsd": 156.23, "evChargingKwh": 0},
+      {"month": "2026-02", "kwh": 1056, "costUsd": 149.67, "evChargingKwh": 0}
     ]
   },
 

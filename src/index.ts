@@ -6,8 +6,7 @@ import { z } from "zod";
 import mockDataJson from "../data/mock_data.json" with { type: "json" };
 
 type MockData = {
-  customer: Record<string, unknown>;
-  customers?: Array<Record<string, unknown>>;
+  customers: Array<Record<string, unknown>>;
   accounts: Record<string, Record<string, unknown>>;
   premises: Record<string, Record<string, unknown>>;
   ev_enrollments: Record<string, Record<string, unknown>>;
@@ -26,7 +25,7 @@ const getCustomers = () => {
     return mockData.customers;
   }
 
-  return [mockData.customer];
+  return [];
 };
 
 const normalizeString = (value: unknown) => String(value ?? "").trim().toLowerCase();
