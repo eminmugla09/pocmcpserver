@@ -2336,7 +2336,39 @@ const startStdioServer = async () => {
   await server.connect(transport);
 };
 
+const ensureSeedUsers = async () => {
+  // Ensure test users exist in production DB (safe - uses ON CONFLICT DO NOTHING)
+  await pool.query(`
+    INSERT INTO users (email, password_hash, full_name) VALUES
+    ('woarzus@gmail.com', '$2b$10$eYA9eNO8vbNw90aFSFnqqu.zMPRM7W52UGKDQhoG77cKPYT3u3iLe', 'Emin Mugla'),
+    ('rjvargas87@gmail.com', '$2b$10$PQCIs2gN6MFaUlY1dvPdsORZJdvLvcSz728KTMfthuOqEtgm7JIEC', 'Ricardo Vargas')
+    ON CONFLICT (email) DO NOTHING
+  `);
+
+  // Ensure customers exist
+  await pool.query(`
+    INSERT INTO customers (customer_number, business_partner_id, first_name, last_name, full_name, email, mobile_phone, preferred_contact_method, preferred_language, customer_since, account_standing_flag)
+    VALUES
+    ('1009988776', '1009988776', 'Emin', 'Mugla', 'Emin Mugla', 'woarzus@gmail.com', '954-666-2333', 'Mobile', 'EN', '2018-03-09', 'GOOD'),
+    ('2009988777', '2009988777', 'Ricardo', 'Vargas', 'Ricardo Vargas', 'rjvargas87@gmail.com', '978-430-9223', 'Email', 'EN', '2020-07-15', 'GOOD')
+    ON CONFLICT (customer_number) DO NOTHING
+  `);
+
+  // Link users to customers
+  await pool.query(`
+    INSERT INTO user_customers (user_id, customer_number, is_primary)
+    SELECT u.id, '1009988776', TRUE FROM users u WHERE u.email = 'woarzus@gmail.com'
+    ON CONFLICT (user_id, customer_number) DO NOTHING
+  `);
+  await pool.query(`
+    INSERT INTO user_customers (user_id, customer_number, is_primary)
+    SELECT u.id, '2009988777', TRUE FROM users u WHERE u.email = 'rjvargas87@gmail.com'
+    ON CONFLICT (user_id, customer_number) DO NOTHING
+  `);
+};
+
 await ensurePersistenceTables();
+await ensureSeedUsers();
 
 if (process.env.MCP_TRANSPORT === "http" || process.env.PORT) {
   startHttpServer();
