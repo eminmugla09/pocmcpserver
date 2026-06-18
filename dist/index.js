@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { createHash } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -1616,7 +1617,7 @@ const verifyPkceChallenge = (verifier, challenge, method) => {
         return verifier === challenge;
     }
     if (method === "S256") {
-        const hash = Buffer.from(require("node:crypto").createHash("sha256").update(verifier).digest()).toString("base64url");
+        const hash = createHash("sha256").update(verifier).digest("base64url");
         return hash === challenge;
     }
     return false;
