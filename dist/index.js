@@ -1546,6 +1546,12 @@ const handleMcpRequest = async (request, response) => {
                 const defaultAccountNumber = await getDefaultAccountNumberForUser(decoded.userId);
                 if (defaultAccountNumber) {
                     toolArguments.account_number = defaultAccountNumber;
+                    logEvent("info", "mcp.auth.account_resolved", {
+                        requestId,
+                        mcpToolName: toolName,
+                        resolvedAccount: defaultAccountNumber,
+                        userEmail: decoded.email
+                    });
                 }
             }
             // Check if user has access to the requested customer data
@@ -1568,7 +1574,14 @@ const handleMcpRequest = async (request, response) => {
                 const accountResult = await pool.query("SELECT customer_number FROM accounts WHERE account_number = $1", [toolArguments.account_number]);
                 const accountCustomerNumber = accountResult.rows[0]?.customer_number;
                 if (accountCustomerNumber && !userCustomerNumbers.includes(accountCustomerNumber)) {
-                    logMcpError(403, -32002, "Access denied. You don't have permission to access this account's data.");
+                    logEvent("warn", "mcp.auth.account_access_denied", {
+                        requestId,
+                        mcpToolName: toolName,
+                        requestedAccount: toolArguments.account_number,
+                        accountCustomer: accountCustomerNumber,
+                        userCustomers: userCustomerNumbers,
+                        userEmail: decoded.email
+                    });
                     writeJson(response, 403, {
                         jsonrpc: "2.0",
                         error: {
