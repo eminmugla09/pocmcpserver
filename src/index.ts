@@ -134,7 +134,7 @@ const findAccounts = async (input: {
 
 // Tool handler functions for direct invocation
 const getMyAccountOverviewHandler = async (userId: string, email: string) => {
-  // Get customer from user_customers link
+  // Get all linked accounts via user_customers
   const ucResult = await pool.query(
     `SELECT uc.customer_number, uc.is_primary, a.account_number, a.premise_number, a.status, a.standing, a.rate_class, a.past_due_flag, a.smart_meter_flag, a.service_address_line1, a.service_address_city, a.service_address_state, a.service_address_zip
      FROM user_customers uc
@@ -149,15 +149,15 @@ const getMyAccountOverviewHandler = async (userId: string, email: string) => {
   }
 
   const primaryAccount = ucResult.rows[0];
-  const accountNumber = primaryAccount.account_number;
 
-  // Get customer profile
+  // Get customer profile (shared across all accounts for this user)
   const customerResult = await pool.query(
     'SELECT customer_number, first_name, last_name, full_name, email, mobile_phone, preferred_language FROM customers WHERE customer_number = $1',
     [primaryAccount.customer_number]
   );
   const customer = customerResult.rows[0] || {};
 
+  // Get registered vehicles for the customer
   const vehiclesResult = await pool.query(
     `SELECT vehicle_id, make, model, year, connector_type, premise_number, registered_date
      FROM registered_vehicles
@@ -166,34 +166,49 @@ const getMyAccountOverviewHandler = async (userId: string, email: string) => {
     [primaryAccount.customer_number]
   );
 
-  // Get latest billing
-  const billingResult = await pool.query(
-    'SELECT * FROM billing WHERE account_number = $1 ORDER BY bill_date DESC LIMIT 1',
-    [accountNumber]
-  );
-  const billing = billingResult.rows[0];
+  // Fetch billing + EV enrollment for every account in parallel
+  const accountsData = await Promise.all(
+    ucResult.rows.map(async (acct: any) => {
+      const [billingResult, evResult] = await Promise.all([
+        pool.query('SELECT * FROM billing WHERE account_number = $1 ORDER BY bill_date DESC LIMIT 1', [acct.account_number]),
+        pool.query('SELECT * FROM ev_enrollments WHERE account_number = $1', [acct.account_number])
+      ]);
 
-  let billingInfo: any = null;
-  if (billing) {
-    const chargesResult = await pool.query(
-      'SELECT * FROM bill_charges WHERE billing_id = $1',
-      [billing.id]
-    );
-    billingInfo = {
-      invoiceId: billing.invoice_id,
-      billDate: billing.bill_date,
-      dueDate: billing.due_date,
-      amountDue: billing.amount_due,
-      billingPeriod: `${billing.billing_period_start} to ${billing.billing_period_end}`,
-      kwhUsed: billing.kwh_used,
-      averageDailyKwh: billing.average_daily_kwh,
-      averageDailyCostUsd: billing.average_daily_cost_usd,
-      charges: chargesResult.rows,
-      evChargingKwh: billing.ev_charging_kwh,
-      evOffPeakKwh: billing.ev_off_peak_kwh,
-      estimatedEvOffPeakSavingsUsd: billing.estimated_ev_off_peak_savings_usd
-    };
-  }
+      const billing = billingResult.rows[0];
+      let billingInfo: any = null;
+      if (billing) {
+        const chargesResult = await pool.query('SELECT * FROM bill_charges WHERE billing_id = $1', [billing.id]);
+        billingInfo = {
+          invoiceId: billing.invoice_id,
+          billDate: billing.bill_date,
+          dueDate: billing.due_date,
+          amountDue: billing.amount_due,
+          billingPeriod: `${billing.billing_period_start} to ${billing.billing_period_end}`,
+          kwhUsed: billing.kwh_used,
+          averageDailyKwh: billing.average_daily_kwh,
+          averageDailyCostUsd: billing.average_daily_cost_usd,
+          charges: chargesResult.rows,
+          evChargingKwh: billing.ev_charging_kwh,
+          evOffPeakKwh: billing.ev_off_peak_kwh,
+          estimatedEvOffPeakSavingsUsd: billing.estimated_ev_off_peak_savings_usd
+        };
+      }
+
+      return {
+        isPrimary: Boolean(acct.is_primary),
+        accountNumber: acct.account_number,
+        premiseNumber: acct.premise_number,
+        status: acct.status,
+        standing: acct.standing,
+        rateClass: acct.rate_class,
+        pastDueFlag: acct.past_due_flag,
+        smartMeterFlag: acct.smart_meter_flag,
+        serviceAddress: `${acct.service_address_line1}, ${acct.service_address_city}, ${acct.service_address_state} ${acct.service_address_zip}`,
+        billing: billingInfo,
+        evEnrollment: evResult.rows[0] || null
+      };
+    })
+  );
 
   return {
     found: true,
@@ -203,18 +218,11 @@ const getMyAccountOverviewHandler = async (userId: string, email: string) => {
       email: customer.email,
       mobilePhone: customer.mobile_phone
     },
-    account: {
-      accountNumber,
-      premiseNumber: primaryAccount.premise_number,
-      status: primaryAccount.status,
-      standing: primaryAccount.standing,
-      rateClass: primaryAccount.rate_class,
-      pastDueFlag: primaryAccount.past_due_flag,
-      smartMeterFlag: primaryAccount.smart_meter_flag,
-      serviceAddress: `${primaryAccount.service_address_line1}, ${primaryAccount.service_address_city}, ${primaryAccount.service_address_state} ${primaryAccount.service_address_zip}`
-    },
     registeredVehicles: vehiclesResult.rows,
-    billing: billingInfo,
+    accounts: accountsData,
+    // Keep top-level shortcuts pointing to primary for single-account users / backward compat
+    account: accountsData[0],
+    billing: accountsData[0]?.billing ?? null,
     allAccounts: ucResult.rows.map((r: any) => r.account_number)
   };
 };
