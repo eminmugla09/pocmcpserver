@@ -157,15 +157,6 @@ const getMyAccountOverviewHandler = async (userId: string, email: string) => {
   );
   const customer = customerResult.rows[0] || {};
 
-  // Get registered vehicles for the customer
-  const vehiclesResult = await pool.query(
-    `SELECT vehicle_id, make, model, year, connector_type, premise_number, registered_date
-     FROM registered_vehicles
-     WHERE customer_number = $1
-     ORDER BY registered_date DESC`,
-    [primaryAccount.customer_number]
-  );
-
   // Fetch billing + EV enrollment for every account in parallel
   const accountsData = await Promise.all(
     ucResult.rows.map(async (acct: any) => {
@@ -218,7 +209,6 @@ const getMyAccountOverviewHandler = async (userId: string, email: string) => {
       email: customer.email,
       mobilePhone: customer.mobile_phone
     },
-    registeredVehicles: vehiclesResult.rows,
     accounts: accountsData,
     // Keep top-level shortcuts pointing to primary for single-account users / backward compat
     account: accountsData[0],
