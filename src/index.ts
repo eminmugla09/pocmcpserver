@@ -158,6 +158,14 @@ const getMyAccountOverviewHandler = async (userId: string, email: string) => {
   );
   const customer = customerResult.rows[0] || {};
 
+  const vehiclesResult = await pool.query(
+    `SELECT vehicle_id, make, model, year, connector_type, premise_number, registered_date
+     FROM registered_vehicles
+     WHERE customer_number = $1
+     ORDER BY registered_date DESC`,
+    [primaryAccount.customer_number]
+  );
+
   // Get latest billing
   const billingResult = await pool.query(
     'SELECT * FROM billing WHERE account_number = $1 ORDER BY bill_date DESC LIMIT 1',
@@ -205,6 +213,7 @@ const getMyAccountOverviewHandler = async (userId: string, email: string) => {
       smartMeterFlag: primaryAccount.smart_meter_flag,
       serviceAddress: `${primaryAccount.service_address_line1}, ${primaryAccount.service_address_city}, ${primaryAccount.service_address_state} ${primaryAccount.service_address_zip}`
     },
+    registeredVehicles: vehiclesResult.rows,
     billing: billingInfo,
     allAccounts: ucResult.rows.map((r: any) => r.account_number)
   };
@@ -338,7 +347,34 @@ const getEvEnrollmentHandler = async ({ account_number }: any) => {
     'SELECT * FROM ev_enrollments WHERE account_number = $1',
     [account_number]
   );
-  return result.rows[0] || { enrolled: false };
+  const enrollment = result.rows[0];
+  if (!enrollment) {
+    return { enrolled: false };
+  }
+
+  const accountResult = await pool.query(
+    'SELECT customer_number FROM accounts WHERE account_number = $1',
+    [account_number]
+  );
+  const customerNumber = accountResult.rows[0]?.customer_number;
+
+  let registeredVehicles: any[] = [];
+  if (customerNumber) {
+    const vehiclesResult = await pool.query(
+      `SELECT vehicle_id, make, model, year, connector_type, premise_number, registered_date
+       FROM registered_vehicles
+       WHERE customer_number = $1
+       ORDER BY registered_date DESC`,
+      [customerNumber]
+    );
+    registeredVehicles = vehiclesResult.rows;
+  }
+
+  return {
+    ...enrollment,
+    customerNumber: customerNumber || null,
+    registeredVehicles
+  };
 };
 
 const checkEvEligibilityHandler = async ({ premise_number }: any) => {

@@ -109,6 +109,10 @@ const getMyAccountOverviewHandler = async (userId, email) => {
     // Get customer profile
     const customerResult = await pool.query('SELECT customer_number, first_name, last_name, full_name, email, mobile_phone, preferred_language FROM customers WHERE customer_number = $1', [primaryAccount.customer_number]);
     const customer = customerResult.rows[0] || {};
+    const vehiclesResult = await pool.query(`SELECT vehicle_id, make, model, year, connector_type, premise_number, registered_date
+     FROM registered_vehicles
+     WHERE customer_number = $1
+     ORDER BY registered_date DESC`, [primaryAccount.customer_number]);
     // Get latest billing
     const billingResult = await pool.query('SELECT * FROM billing WHERE account_number = $1 ORDER BY bill_date DESC LIMIT 1', [accountNumber]);
     const billing = billingResult.rows[0];
@@ -148,6 +152,7 @@ const getMyAccountOverviewHandler = async (userId, email) => {
             smartMeterFlag: primaryAccount.smart_meter_flag,
             serviceAddress: `${primaryAccount.service_address_line1}, ${primaryAccount.service_address_city}, ${primaryAccount.service_address_state} ${primaryAccount.service_address_zip}`
         },
+        registeredVehicles: vehiclesResult.rows,
         billing: billingInfo,
         allAccounts: ucResult.rows.map((r) => r.account_number)
     };
@@ -246,7 +251,25 @@ const getUsageHistoryHandler = async ({ account_number }) => {
 };
 const getEvEnrollmentHandler = async ({ account_number }) => {
     const result = await pool.query('SELECT * FROM ev_enrollments WHERE account_number = $1', [account_number]);
-    return result.rows[0] || { enrolled: false };
+    const enrollment = result.rows[0];
+    if (!enrollment) {
+        return { enrolled: false };
+    }
+    const accountResult = await pool.query('SELECT customer_number FROM accounts WHERE account_number = $1', [account_number]);
+    const customerNumber = accountResult.rows[0]?.customer_number;
+    let registeredVehicles = [];
+    if (customerNumber) {
+        const vehiclesResult = await pool.query(`SELECT vehicle_id, make, model, year, connector_type, premise_number, registered_date
+       FROM registered_vehicles
+       WHERE customer_number = $1
+       ORDER BY registered_date DESC`, [customerNumber]);
+        registeredVehicles = vehiclesResult.rows;
+    }
+    return {
+        ...enrollment,
+        customerNumber: customerNumber || null,
+        registeredVehicles
+    };
 };
 const checkEvEligibilityHandler = async ({ premise_number }) => {
     const result = await pool.query('SELECT * FROM ev_eligibility WHERE premise_number = $1', [premise_number]);
