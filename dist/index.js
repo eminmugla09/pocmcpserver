@@ -282,43 +282,157 @@ const checkEvEligibilityHandler = async ({ premise_number }) => {
 };
 const matchPropertyToCustomerHandler = async ({ address }) => {
     const premise = await findPremiseByAddress(address);
-    if (premise?.premise_number !== "60587744") {
+    if (!premise) {
         return { matched: false, event: "NO_MATCH" };
     }
+    const activeAccountResult = premise.active_account_number
+        ? await pool.query(`SELECT a.account_number, a.customer_number, c.full_name
+         FROM accounts a
+         INNER JOIN customers c ON c.customer_number = a.customer_number
+         WHERE a.account_number = $1`, [premise.active_account_number])
+        : { rows: [] };
+    const ownerMatchResult = activeAccountResult.rows.length > 0
+        ? activeAccountResult
+        : await pool.query(`SELECT NULL::text AS account_number, customer_number, full_name
+         FROM customers
+         WHERE $1 ILIKE '%' || full_name || '%'
+         ORDER BY customer_since ASC
+         LIMIT 1`, [premise.new_owner_on_record || ""]);
+    const matchedCustomer = ownerMatchResult.rows[0] || null;
+    const existingServicesResult = matchedCustomer?.customer_number
+        ? await pool.query(`SELECT a.account_number, a.premise_number, a.status, a.service_address_line1,
+                a.service_address_city, a.service_address_state, a.service_address_zip,
+                COALESCE(json_agg(DISTINCT ap.program_name) FILTER (WHERE ap.program_name IS NOT NULL), '[]') AS programs
+         FROM accounts a
+         LEFT JOIN account_programs ap ON ap.account_number = a.account_number
+         WHERE a.customer_number = $1
+         GROUP BY a.account_number
+         ORDER BY a.account_number`, [matchedCustomer.customer_number])
+        : { rows: [] };
+    const registeredVehiclesResult = matchedCustomer?.customer_number
+        ? await pool.query(`SELECT vehicle_id, make, model, year, connector_type, premise_number
+         FROM registered_vehicles
+         WHERE customer_number = $1
+         ORDER BY registered_date DESC`, [matchedCustomer.customer_number])
+        : { rows: [] };
     return {
-        matchedCustomer: "1009988776",
-        premiseNumber: "60587744",
-        event: "NEW_OWNER_RECORDED",
-        recordedDate: "2026-06-05",
-        existingServices: ["FPL EVolution Home @ premise 60412233", "Registered EV: Tesla Model Y"]
+        matched: Boolean(matchedCustomer),
+        matchedCustomer: matchedCustomer?.customer_number || null,
+        matchedCustomerName: matchedCustomer?.full_name || null,
+        premiseNumber: premise.premise_number,
+        event: matchedCustomer ? "CUSTOMER_LINKED_TO_PREMISE" : "PREMISE_FOUND_NO_CUSTOMER_MATCH",
+        serviceStatus: premise.service_status,
+        newOwnerOnRecord: premise.new_owner_on_record || null,
+        existingServices: existingServicesResult.rows,
+        registeredVehicles: registeredVehiclesResult.rows
     };
 };
 const getServiceConnectionQuoteHandler = async ({ premise_number }) => {
     const result = await pool.query('SELECT * FROM service_connection_quotes WHERE premise_number = $1', [premise_number]);
     return result.rows[0] || { found: false };
 };
-const startServiceConnectionHandler = async (input) => ({
-    status: "SUBMITTED",
-    serviceOrderId: "SO-NPB-7741200",
-    premiseNumber: input.premise_number,
-    scheduledConnectDate: "2026-06-13",
-    message: "New residential power connection scheduled. No deposit required (existing customer in good standing). Confirmation also sent to customer email."
-});
-const enrollEvChargingHandler = async (input) => ({
-    status: "ENROLLMENT_STARTED",
-    enrollmentId: "EVH-NPB-330145",
-    premiseNumber: input.premise_number,
-    installType: input.install_type === "full" ? "Full installation" : "Equipment-only",
-    monthlyCharge: input.install_type === "full" ? 36.00 : 27.00,
-    nextStep: "Electrical assessment - we'll text a link to upload garage photos",
-    estimatedCompletion: "2-3 months from electrical assessment",
-    message: "Started FPL EVolution Home enrollment. Because there's no existing 240V circuit in the garage, full installation is recommended at $36/month."
-});
-const setMoveIntentHandler = async (input) => ({
-    status: "RECORDED",
-    intent: input.intent === "keep_both" ? "KEEP_BOTH" : "MOVE_OUT",
-    message: "Noted that you intend to keep both the Miami and North Palm Beach properties. No move-out order created for the Miami account (5210099001)."
-});
+const startServiceConnectionHandler = async (input) => {
+    const quote = await getServiceConnectionQuoteHandler({ premise_number: input.premise_number });
+    const scheduledConnectDate = input.requested_connect_date
+        || quote.earliest_connect_date
+        || quote.standard_connect_date
+        || null;
+    let depositSummary = "Deposit status was not available for this premise.";
+    if (quote.found !== false && quote.deposit_required) {
+        depositSummary = `Deposit may be required: ${quote.deposit_reason || "reason not specified"}.`;
+    }
+    if (quote.found !== false && !quote.deposit_required) {
+        const depositReason = quote.deposit_reason ? `: ${quote.deposit_reason}` : "";
+        depositSummary = `No deposit required${depositReason}.`;
+    }
+    const serviceOrderId = makeId("SO");
+    const message = `New residential power connection submitted for the resolved premise. ${depositSummary}`;
+    const result = await pool.query(`INSERT INTO service_connection_orders
+      (service_order_id, premise_number, account_number, requested_connect_date, scheduled_connect_date, status, message)
+     VALUES ($1, $2, $3, $4, $5, 'SUBMITTED', $6)
+     RETURNING service_order_id, premise_number, account_number, requested_connect_date, scheduled_connect_date, status, message, created_at`, [
+        serviceOrderId,
+        input.premise_number,
+        input.account_number || null,
+        input.requested_connect_date || null,
+        scheduledConnectDate,
+        message
+    ]);
+    const order = result.rows[0];
+    return {
+        status: order.status,
+        serviceOrderId: order.service_order_id,
+        premiseNumber: order.premise_number,
+        accountNumber: order.account_number,
+        serviceAddress: quote.address || null,
+        requestedConnectDate: order.requested_connect_date,
+        scheduledConnectDate: order.scheduled_connect_date,
+        connectionFeeUsd: quote.connection_fee_usd ?? null,
+        rateClass: quote.rate_class || null,
+        message: order.message,
+        createdAt: order.created_at
+    };
+};
+const enrollEvChargingHandler = async (input) => {
+    const eligibility = await checkEvEligibilityHandler({ premise_number: input.premise_number });
+    const monthlyCharge = input.install_type === "full" ? 36 : 27;
+    const installType = input.install_type === "full" ? "Full installation" : "Equipment-only";
+    const readinessNote = eligibility.notes
+        ? ` Eligibility note: ${eligibility.notes}`
+        : "";
+    const enrollmentId = makeId("EVH");
+    const nextStep = input.install_type === "full"
+        ? "Electrical assessment and garage readiness review."
+        : "Equipment-only enrollment review.";
+    const estimatedCompletion = input.install_type === "full"
+        ? "Estimated after electrical assessment and permitting."
+        : "Estimated after equipment review and scheduling.";
+    const message = `Started FPL EVolution Home enrollment for the resolved premise using ${installType.toLowerCase()} at $${monthlyCharge}/month.${readinessNote}`;
+    const result = await pool.query(`INSERT INTO ev_enrollment_orders
+      (enrollment_id, premise_number, account_number, install_type, monthly_charge, next_step, estimated_completion, status, message)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'ENROLLMENT_STARTED', $8)
+     RETURNING enrollment_id, premise_number, account_number, install_type, monthly_charge, next_step, estimated_completion, status, message, created_at`, [
+        enrollmentId,
+        input.premise_number,
+        input.account_number || null,
+        input.install_type,
+        monthlyCharge,
+        nextStep,
+        estimatedCompletion,
+        message
+    ]);
+    const order = result.rows[0];
+    return {
+        status: order.status,
+        enrollmentId: order.enrollment_id,
+        premiseNumber: order.premise_number,
+        accountNumber: order.account_number,
+        installType: order.install_type,
+        monthlyCharge: order.monthly_charge,
+        eligibilityFound: eligibility.found !== false,
+        recommendedInstallType: eligibility.recommended_install_type || null,
+        nextStep: order.next_step,
+        estimatedCompletion: order.estimated_completion,
+        message: order.message,
+        createdAt: order.created_at
+    };
+};
+const setMoveIntentHandler = async (input) => {
+    const message = input.intent === "keep_both"
+        ? "Noted that you intend to keep your existing service active while starting service at the new premise. No move-out order was created."
+        : "Noted that you intend to move out of an existing premise. No stop-service order is created until the existing premise and stop date are explicitly confirmed.";
+    const result = await pool.query(`INSERT INTO move_intents (customer_number, intent, message)
+     VALUES ($1, $2, $3)
+     RETURNING customer_number, intent, message, created_at`, [input.customer_number, input.intent, message]);
+    const moveIntent = result.rows[0];
+    return {
+        status: "RECORDED",
+        customerNumber: moveIntent.customer_number,
+        intent: moveIntent.intent,
+        message: moveIntent.message,
+        createdAt: moveIntent.created_at
+    };
+};
 const makeVehicleId = () => `EVREG-${Math.floor(1000 + Math.random() * 9000)}`;
 const registerVehicleHandler = async (input) => {
     const { customer_number, linked_premise, make, model, year, connector_type, vehicle_id } = input;
@@ -397,6 +511,46 @@ const removeRegisteredVehicleHandler = async ({ vehicle_id }) => {
 };
 const makeId = (prefix) => `${prefix}-${Math.floor(100000 + Math.random() * 900000)}`;
 const ensurePersistenceTables = async () => {
+    await pool.query(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp";`);
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS service_connection_orders (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      service_order_id VARCHAR(50) UNIQUE NOT NULL,
+      premise_number VARCHAR(20) NOT NULL,
+      account_number VARCHAR(20),
+      requested_connect_date DATE,
+      scheduled_connect_date DATE,
+      status VARCHAR(50),
+      message TEXT,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS ev_enrollment_orders (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      enrollment_id VARCHAR(50) UNIQUE NOT NULL,
+      premise_number VARCHAR(20) NOT NULL,
+      account_number VARCHAR(20),
+      install_type VARCHAR(50),
+      monthly_charge DECIMAL(10, 2),
+      next_step TEXT,
+      estimated_completion TEXT,
+      status VARCHAR(50),
+      message TEXT,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS move_intents (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      customer_number VARCHAR(20) NOT NULL,
+      intent VARCHAR(50) NOT NULL,
+      message TEXT,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
     await pool.query(`
     CREATE TABLE IF NOT EXISTS service_orders (
       service_order_id TEXT PRIMARY KEY,
@@ -1072,7 +1226,7 @@ const createFplMcpServer = () => {
         }
     }, async ({ account_number }) => jsonContent(await getAccountSummaryHandler({ account_number })));
     server.registerTool("get_premise_details", {
-        description: "Return premise details by premise number or service address.",
+        description: "Return premise details by premise number or service address. Use after an available public-property records connector/tool discovers a recent new-home address, or when the customer provides a street address directly.",
         inputSchema: {
             premise_number: z.string().optional(),
             address: z.string().optional()
@@ -1106,13 +1260,13 @@ const createFplMcpServer = () => {
         }
     }, async ({ account_number }) => jsonContent(await getEvEnrollmentHandler({ account_number })));
     server.registerTool("check_ev_eligibility", {
-        description: "Return premise-specific FPL EVolution Home eligibility checks and recommended install type.",
+        description: "Return premise-specific FPL EVolution Home eligibility checks and recommended install type. Requires a premise_number. If the user only mentioned a city, new area, or move without a street address, use an available public-property records connector/tool to find the recent property event, then resolve the FPL premise. If that connector/tool is not available, ask for the street address first.",
         inputSchema: {
             premise_number: z.string()
         }
     }, async ({ premise_number }) => jsonContent(await checkEvEligibilityHandler({ premise_number })));
     server.registerTool("match_property_to_customer", {
-        description: "Match a North Palm Beach property-registration event to the customer.",
+        description: "Link a known new-property street address to the existing FPL customer and premise. Use after an available public-property records connector/tool finds a recent property event, or when the customer directly provides the new address. This tool cannot discover public records by owner; if no public-property connector/tool is available, ask the customer for the street address.",
         inputSchema: {
             address: z.string()
         }
@@ -1127,7 +1281,7 @@ const createFplMcpServer = () => {
         }
     }, async ({ premise_number }) => jsonContent(await getServiceConnectionQuoteHandler({ premise_number })));
     server.registerTool("start_service_connection", {
-        description: "Submit a new residential power connection request.",
+        description: "Submit a new residential power connection request for a resolved premise. Only call after the customer confirms the specific service address/premise and the connection quote or earliest connection date. If the user only mentioned a city, new area, or move without a street address, first resolve the address through an available public-property records connector/tool or ask the customer for the street address.",
         inputSchema: {
             premise_number: z.string(),
             account_number: z.string().optional(),
@@ -1138,13 +1292,15 @@ const createFplMcpServer = () => {
         description: "Start FPL EVolution Home enrollment for a premise.",
         inputSchema: {
             premise_number: z.string(),
+            account_number: z.string().optional(),
             install_type: z.enum(["full", "equipment_only"])
         }
     }, async (input) => jsonContent(await enrollEvChargingHandler(input)));
     server.registerTool("set_move_intent", {
-        description: "Record whether the customer is keeping both homes or moving out of Miami.",
+        description: "Record whether the customer is keeping existing electric service active while starting service at the new premise, or wants to move out/stop service at an existing premise. Only call after the customer explicitly confirms their intent. Never stop existing service based only on a public-property event, inferred move, city mention, or EV inquiry.",
         inputSchema: {
-            intent: z.enum(["keep_both", "move_out_miami"])
+            customer_number: z.string().optional(),
+            intent: z.enum(["keep_both", "move_out_existing", "move_out_miami"])
         }
     }, async (input) => jsonContent(await setMoveIntentHandler(input)));
     server.registerTool("register_vehicle", {
@@ -1462,6 +1618,8 @@ const ACCOUNT_SCOPED_TOOLS = new Set([
     "get_payment_history",
     "get_usage_history",
     "get_ev_enrollment",
+    "start_service_connection",
+    "enroll_ev_charging",
     "set_autopay",
     "cancel_autopay",
     "update_payment_method",
@@ -1486,6 +1644,7 @@ const ACCOUNT_SCOPED_TOOLS = new Set([
 const CUSTOMER_SCOPED_TOOLS = new Set([
     "get_customer_profile",
     "register_vehicle",
+    "set_move_intent",
     "update_contact_info",
     "update_notification_preferences",
     "set_preferred_language",
@@ -1740,21 +1899,21 @@ const handleMcpRequest = async (request, response) => {
             // Create a mock stdio transport to get the tools list
             // We'll use the server's internal method to get tools
             const tools = [
-                { name: "get_my_account_overview", description: "USE THIS FIRST for any billing, account status, profile, or balance question from an authenticated user. No parameters needed — resolves everything from login. Returns: all linked accounts each with full billing breakdown (amount due, due date, charges, kWh), account status/standing/rate class, EV enrollment, and customer profile. Supports multi-account users via accounts[] array.", inputSchema: { type: "object", properties: {}, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "get_my_account_overview", description: "USE THIS FIRST for any billing, account status, profile, EV service, move-in, new-home, city or area change, or balance question from an authenticated user. No parameters needed — resolves everything from login. Returns all linked accounts with billing, account status, service address, EV enrollment, customer full name, email, and phone. If the user mentions any city, new area, or move without a street address, use an available public-property records connector/tool with this customer profile to discover recent property events. If that connector/tool is not available, ask the customer for the street address before checking premise details or EV eligibility.", inputSchema: { type: "object", properties: {}, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
                 { name: "get_customer_profile", description: "Look up a customer by customer_number, phone, or email. Returns name, contact info, linked accounts, premises, and registered EVs. Use for agent/lookup flows or when the authenticated user is not the customer being queried. Do NOT use this to get billing — use get_my_account_overview instead.", inputSchema: { type: "object", properties: { customer_number: { type: "string" }, phone: { type: "string" }, email: { type: "string" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
                 { name: "lookup_account", description: "Resolve a residential account by account_number, customer_number, phone, email, premise_number, or address. Use when you need to find an account that is not linked to the current authenticated user. Do NOT call this for the logged-in user's own account — use get_my_account_overview instead.", inputSchema: { type: "object", properties: { account_number: { type: "string" }, customer_number: { type: "string" }, phone: { type: "string" }, email: { type: "string" }, premise_number: { type: "string" }, address: { type: "string" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
                 { name: "get_account_summary", description: "Return account status, standing (Good/Past Due), rate class (e.g. RS-1, TOU-EV), smart meter flag, enrolled programs, and account flags for a specific account. Use when you need deeper account-level detail beyond what get_my_account_overview provides. account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
-                { name: "get_premise_details", description: "Return property details for a service address or premise number. Includes property type, service status, meter details, garage readiness (240V circuit, WiFi), and EV installation suitability. Use before checking EV eligibility or quoting a service connection.", inputSchema: { type: "object", properties: { premise_number: { type: "string" }, address: { type: "string" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "get_premise_details", description: "Return property details for a service address or premise number. Includes property type, service status, meter details, garage readiness (240V circuit, WiFi), and EV installation suitability. Use after an available public-property records connector/tool discovers a recent new-home address, or when the customer provides a street address directly. Use before checking EV eligibility or quoting a service connection.", inputSchema: { type: "object", properties: { premise_number: { type: "string" }, address: { type: "string" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
                 { name: "get_billing_inquiry", description: "Return detailed billing for a specific account: current bill amount, due date, billing period, kWh used, average daily cost, full charge-line breakdown (base, fuel, non-fuel, EVolution, taxes), and EV off-peak savings. Use when you need billing for a non-primary account or deeper detail than get_my_account_overview provides. account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
                 { name: "get_payment_history", description: "Return recent payments (date, amount, method) and AutoPay status including next scheduled payment date and amount. Use for questions like 'did my payment go through', 'when is my next autopay', or 'show my payment history'. account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
                 { name: "get_usage_history", description: "Return month-by-month kWh usage, cost, and EV charging kWh going back up to 12 months. Use for questions about usage trends, seasonal comparisons, or 'why is my bill higher this month'. account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
                 { name: "get_ev_enrollment", description: "Return FPL EVolution Home EV charging enrollment details: charger ID, model, status (Active/Paused/Cancelled), install type (full/equipment_only), monthly charge, install date, and registered vehicles linked to this account. Use for questions about 'which car', 'my EV charger', 'EVolution Home plan', or EV charging setup.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
-                { name: "check_ev_eligibility", description: "Check whether a specific premise is eligible for FPL EVolution Home EV charging enrollment. Returns eligibility status, recommended install type (full vs equipment_only), and any blockers. Requires premise_number — get it from get_premise_details or lookup_account first.", inputSchema: { type: "object", properties: { premise_number: { type: "string" } }, required: ["premise_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
-                { name: "match_property_to_customer", description: "Match a new property address to an existing FPL customer, simulating a home-registration event (e.g. North Palm Beach). Use at the start of a new-home or move scenario to link the property to the customer before offering service connection or EV enrollment.", inputSchema: { type: "object", properties: { address: { type: "string" } }, required: ["address"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "check_ev_eligibility", description: "Check whether a specific premise is eligible for FPL EVolution Home EV charging enrollment. Returns eligibility status, recommended install type (full vs equipment_only), and any blockers. Requires premise_number. If the user only mentioned a city, new area, or move without a street address, use an available public-property records connector/tool to find the recent property event, then resolve the FPL premise with get_premise_details. If that connector/tool is not available, ask for the street address first.", inputSchema: { type: "object", properties: { premise_number: { type: "string" } }, required: ["premise_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "match_property_to_customer", description: "Link a known new-property street address to the existing FPL customer and premise, simulating a home-registration event. Use after an available public-property records connector/tool finds a recent property event, or when the customer directly provides the new address. This tool cannot discover public records by owner; if no public-property connector/tool is available, ask the customer for the street address.", inputSchema: { type: "object", properties: { address: { type: "string" } }, required: ["address"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
                 { name: "get_service_connection_quote", description: "Get a move-in power connection quote for a premise: deposit required, connection fee, and earliest available connection date. Call before start_service_connection to confirm details with the customer.", inputSchema: { type: "object", properties: { premise_number: { type: "string" } }, required: ["premise_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
-                { name: "start_service_connection", description: "Submit a new residential power connection order for a premise. Only call after the customer has confirmed the connection details from get_service_connection_quote. Returns service order ID and scheduled connect date.", inputSchema: { type: "object", properties: { premise_number: { type: "string" }, account_number: { type: "string" }, requested_connect_date: { type: "string" } }, required: ["premise_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
-                { name: "enroll_ev_charging", description: "Submit an FPL EVolution Home EV charging enrollment for a premise. Only call after the customer has confirmed and eligibility has been verified via check_ev_eligibility. install_type must be 'full' (includes electrical work, 240V circuit, charger install) or 'equipment_only' (charger swap only, existing 240V circuit).", inputSchema: { type: "object", properties: { premise_number: { type: "string" }, install_type: { type: "string", enum: ["full", "equipment_only"] } }, required: ["premise_number", "install_type"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
-                { name: "set_move_intent", description: "Record the customer's intent when moving: 'keep_both' means they are keeping their existing FPL service active AND starting service at the new address; 'move_out_miami' means they are stopping service at the old address. Only call after explicit customer confirmation — never stop service without confirmation.", inputSchema: { type: "object", properties: { intent: { type: "string", enum: ["keep_both", "move_out_miami"] } }, required: ["intent"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "start_service_connection", description: "Submit a new residential power connection order for a resolved premise. Only call after the customer confirms the specific service address/premise and the connection details from get_service_connection_quote. If the user only mentioned a city, new area, or move without a street address, first resolve the address through an available public-property records connector/tool or ask the customer for the street address. Returns service order ID and scheduled connect date.", inputSchema: { type: "object", properties: { premise_number: { type: "string" }, account_number: { type: "string" }, requested_connect_date: { type: "string" } }, required: ["premise_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "enroll_ev_charging", description: "Submit an FPL EVolution Home EV charging enrollment for a premise. Only call after the customer has confirmed and eligibility has been verified via check_ev_eligibility. install_type must be 'full' (includes electrical work, 240V circuit, charger install) or 'equipment_only' (charger swap only, existing 240V circuit). account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { premise_number: { type: "string" }, account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." }, install_type: { type: "string", enum: ["full", "equipment_only"] } }, required: ["premise_number", "install_type"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "set_move_intent", description: "Record the customer's intent when moving: 'keep_both' means they are keeping existing FPL service active AND starting service at the new address; 'move_out_existing' means they may stop service at an existing address after the existing premise and stop date are explicitly confirmed. 'move_out_miami' is kept for older Miami demo flows. Only call after explicit customer confirmation — never stop service based only on a public-property event, inferred move, city mention, or EV inquiry. customer_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { customer_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." }, intent: { type: "string", enum: ["keep_both", "move_out_existing", "move_out_miami"] } }, required: ["intent"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
                 { name: "register_vehicle", description: "Register a new electric vehicle for a customer. Required: make, model, year, connector_type (e.g. J1772, CCS, CHAdeMO, Tesla). Links the EV to the customer's FPL account for EV charging tracking. customer_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { customer_number: { type: "string" }, linked_premise: { type: "string" }, make: { type: "string" }, model: { type: "string" }, year: { type: "number" }, connector_type: { type: "string" }, vehicle_id: { type: "string" } }, required: ["customer_number", "make", "model", "year", "connector_type"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
                 { name: "update_registered_vehicle", description: "Update an existing registered EV's details (make, model, year, connector_type, linked_premise). Use when the customer changes their vehicle or corrects registration info. Requires vehicle_id from get_ev_enrollment.", inputSchema: { type: "object", properties: { vehicle_id: { type: "string" }, linked_premise: { type: "string" }, make: { type: "string" }, model: { type: "string" }, year: { type: "number" }, connector_type: { type: "string" } }, required: ["vehicle_id"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
                 { name: "remove_registered_vehicle", description: "Remove a registered EV from the customer's account by vehicle_id. Use when the customer no longer owns the vehicle. Requires vehicle_id from get_ev_enrollment.", inputSchema: { type: "object", properties: { vehicle_id: { type: "string" } }, required: ["vehicle_id"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
@@ -2358,36 +2517,7 @@ const startStdioServer = async () => {
     const transport = new StdioServerTransport();
     await server.connect(transport);
 };
-const ensureSeedUsers = async () => {
-    // Ensure test users exist in production DB (safe - uses ON CONFLICT DO NOTHING)
-    await pool.query(`
-    INSERT INTO users (email, password_hash, full_name) VALUES
-    ('woarzus@gmail.com', '$2b$10$eYA9eNO8vbNw90aFSFnqqu.zMPRM7W52UGKDQhoG77cKPYT3u3iLe', 'Emin Mugla'),
-    ('rjvargas87@gmail.com', '$2b$10$PQCIs2gN6MFaUlY1dvPdsORZJdvLvcSz728KTMfthuOqEtgm7JIEC', 'Ricardo Vargas')
-    ON CONFLICT (email) DO NOTHING
-  `);
-    // Ensure customers exist
-    await pool.query(`
-    INSERT INTO customers (customer_number, business_partner_id, first_name, last_name, full_name, email, mobile_phone, preferred_contact_method, preferred_language, customer_since, account_standing_flag)
-    VALUES
-    ('1009988776', '1009988776', 'Emin', 'Mugla', 'Emin Mugla', 'woarzus@gmail.com', '954-666-2333', 'Mobile', 'EN', '2018-03-09', 'GOOD'),
-    ('2009988777', '2009988777', 'Ricardo', 'Vargas', 'Ricardo Vargas', 'rjvargas87@gmail.com', '978-430-9223', 'Email', 'EN', '2020-07-15', 'GOOD')
-    ON CONFLICT (customer_number) DO NOTHING
-  `);
-    // Link users to customers
-    await pool.query(`
-    INSERT INTO user_customers (user_id, customer_number, is_primary)
-    SELECT u.id, '1009988776', TRUE FROM users u WHERE u.email = 'woarzus@gmail.com'
-    ON CONFLICT (user_id, customer_number) DO NOTHING
-  `);
-    await pool.query(`
-    INSERT INTO user_customers (user_id, customer_number, is_primary)
-    SELECT u.id, '2009988777', TRUE FROM users u WHERE u.email = 'rjvargas87@gmail.com'
-    ON CONFLICT (user_id, customer_number) DO NOTHING
-  `);
-};
 await ensurePersistenceTables();
-await ensureSeedUsers();
 if (process.env.MCP_TRANSPORT === "http" || process.env.PORT) {
     startHttpServer();
 }

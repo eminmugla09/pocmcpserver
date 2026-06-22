@@ -280,7 +280,7 @@ CREATE TABLE ev_enrollment_orders (
 CREATE TABLE move_intents (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     customer_number VARCHAR(20) NOT NULL,
-    intent VARCHAR(50) NOT NULL, -- 'keep_both' or 'move_out_miami'
+    intent VARCHAR(50) NOT NULL, -- 'keep_both', 'move_out_existing', or 'move_out_miami'
     message TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (customer_number) REFERENCES customers(customer_number)
