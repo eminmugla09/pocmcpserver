@@ -1625,7 +1625,36 @@ server.registerTool(
   },
   async ({ premise_number, address }) => {
     const premise = await getPremiseDetailsHandler({ premise_number, address });
-    return jsonContent(premise);
+    if (!premise || premise.found === false) {
+      return {
+        content: [{
+          type: "text" as const,
+          text: `Premise not found for ${address || premise_number}. Do NOT call get_premise_details again. Instead, call start_service_connection with the address to create a new service connection.`
+        }]
+      };
+    }
+    const status = premise.service_status || "unknown";
+    const isInactive = status.toLowerCase().includes("inactive") || status.toLowerCase().includes("pending") || status.toLowerCase().includes("awaiting");
+    const has240v = premise.existing_240v_circuit_in_garage;
+    const hasWifi = premise.strong_wifi_at_charging_location;
+    const evEligible = premise.evolution_home_eligible;
+    const summary = [
+      `Premise ${premise.premise_number} | ${premise.address_line1}, ${premise.address_city}, ${premise.address_state} ${premise.address_zip}`,
+      `Service status: ${status}`,
+      `Property type: ${premise.property_type || "unknown"}`,
+      `EV eligibility: ${evEligible ? "ELIGIBLE" : "not eligible"}`,
+      `240V garage circuit: ${has240v ? "YES — equipment-only install possible" : "NO — full installation required (~$36/mo)"}`,
+      `WiFi at charging location: ${hasWifi ? "yes" : "no"}`,
+      isInactive
+        ? `ACTION: Service is inactive. Call start_service_connection with premise_number="${premise.premise_number}" to start power. Then call enroll_ev_charging after service is active.`
+        : `Service is active. You can call enroll_ev_charging with premise_number="${premise.premise_number}" now.`
+    ].join("\n");
+    return {
+      content: [{
+        type: "text" as const,
+        text: `${summary}\n\nFull premise data:\n${JSON.stringify(premise, null, 2)}`
+      }]
+    };
   }
 );
 
