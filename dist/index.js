@@ -58,9 +58,18 @@ const jsonContent = (payload) => ({
     ]
 });
 const findPremiseByAddress = async (address) => {
-    const normalizedAddress = address.toLowerCase();
+    // Normalize: lowercase, strip punctuation, collapse spaces
+    const normalize = (s) => s.toLowerCase().replace(/[.,#]/g, '').replace(/\s+/g, ' ').trim();
+    const normalizedInput = normalize(address);
+    // Extract just the street part (before first comma if present)
+    const streetPart = normalize(normalizedInput.split(',')[0]);
+    // Try full address match first, then street-only match
     const result = await pool.query(`SELECT * FROM premises WHERE 
-     LOWER(address_line1 || ' ' || address_city || ' ' || address_state || ' ' || address_zip) LIKE $1`, [`%${normalizedAddress}%`]);
+     LOWER(regexp_replace(address_line1 || ' ' || address_city || ' ' || address_state || ' ' || address_zip, '[.,#]+', '', 'g')) LIKE $1
+     OR LOWER(regexp_replace(address_line1, '[.,#]+', '', 'g')) LIKE $2
+     ORDER BY 
+       CASE WHEN LOWER(regexp_replace(address_line1, '[.,#]+', '', 'g')) LIKE $2 THEN 0 ELSE 1 END
+     LIMIT 1`, [`%${normalizedInput}%`, `%${streetPart}%`]);
     return result.rows[0] || null;
 };
 const findAccounts = async (input) => {
