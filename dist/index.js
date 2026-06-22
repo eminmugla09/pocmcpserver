@@ -345,11 +345,34 @@ const getServiceConnectionQuoteHandler = async ({ premise_number }) => {
     return result.rows[0] || { found: false };
 };
 const startServiceConnectionHandler = async (input) => {
+    // Idempotency check — return existing SUBMITTED order if one already exists for this premise
+    const existing = await pool.query(`SELECT * FROM service_connection_orders WHERE premise_number = $1 AND status = 'SUBMITTED' ORDER BY created_at DESC LIMIT 1`, [input.premise_number]);
+    if (existing.rows.length > 0) {
+        const order = existing.rows[0];
+        const quote = await getServiceConnectionQuoteHandler({ premise_number: input.premise_number });
+        return {
+            status: order.status,
+            serviceOrderId: order.service_order_id,
+            premiseNumber: order.premise_number,
+            accountNumber: order.account_number,
+            serviceAddress: quote.address || null,
+            requestedConnectDate: order.requested_connect_date,
+            scheduledConnectDate: order.scheduled_connect_date,
+            connectionFeeUsd: quote.connection_fee_usd ?? null,
+            rateClass: quote.rate_class || null,
+            message: `ALREADY SUBMITTED — do NOT call start_service_connection again. Service order ${order.service_order_id} is already active for this premise. The premise service_status will update when power is connected. Next step: wait for activation, then call enroll_ev_charging.`,
+            createdAt: order.created_at,
+            duplicate: true
+        };
+    }
     const quote = await getServiceConnectionQuoteHandler({ premise_number: input.premise_number });
+    // Use today's date if the quote dates are in the past
+    const today = new Date().toISOString().split('T')[0];
+    const quoteDate = quote.earliest_connect_date
+        ? new Date(quote.earliest_connect_date).toISOString().split('T')[0]
+        : null;
     const scheduledConnectDate = input.requested_connect_date
-        || quote.earliest_connect_date
-        || quote.standard_connect_date
-        || null;
+        || (quoteDate && quoteDate >= today ? quoteDate : today);
     let depositSummary = "Deposit status was not available for this premise.";
     if (quote.found !== false && quote.deposit_required) {
         depositSummary = `Deposit may be required: ${quote.deposit_reason || "reason not specified"}.`;
@@ -382,7 +405,7 @@ const startServiceConnectionHandler = async (input) => {
         scheduledConnectDate: order.scheduled_connect_date,
         connectionFeeUsd: quote.connection_fee_usd ?? null,
         rateClass: quote.rate_class || null,
-        message: order.message,
+        message: `${order.message} Service order ${order.service_order_id} is now SUBMITTED. Do NOT call start_service_connection again for this premise. Next step: call enroll_ev_charging with premise_number="${order.premise_number}" and install_type="full".`,
         createdAt: order.created_at
     };
 };
