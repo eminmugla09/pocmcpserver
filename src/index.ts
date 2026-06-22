@@ -75,8 +75,12 @@ const jsonContent = (payload: unknown) => ({
 });
 
 const findPremiseByAddress = async (address: string) => {
-  // Normalize: lowercase, strip punctuation, collapse spaces
-  const normalize = (s: string) => s.toLowerCase().replace(/[.,#]/g, '').replace(/\s+/g, ' ').trim();
+  // Normalize: lowercase, strip punctuation, abbreviate common street suffixes, collapse spaces
+  const normalize = (s: string) => s.toLowerCase()
+    .replace(/\bdrive\b/g, 'dr').replace(/\bstreet\b/g, 'st').replace(/\bavenue\b/g, 'ave')
+    .replace(/\boulevard\b/g, 'blvd').replace(/\broad\b/g, 'rd').replace(/\bcourt\b/g, 'ct')
+    .replace(/\blane\b/g, 'ln').replace(/\bplace\b/g, 'pl').replace(/\bcircle\b/g, 'cir')
+    .replace(/[.,#]/g, '').replace(/\s+/g, ' ').trim();
   const normalizedInput = normalize(address);
 
   // Extract just the street part (before first comma if present)
