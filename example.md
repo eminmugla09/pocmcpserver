@@ -17,6 +17,7 @@ Show property EV eligibility, display available plans, and **only** offer to sch
 - Customer: Emin Mugla
 - Existing account: `5210099001` / Miami premise `60412233`
 - Linked premises include `60587744` (North Palm Beach)
+- **proactiveNextSteps:** "If the user mentioned a new city, area, move, new home, or EV service at a different location from the linked accounts, you MUST search available public-property records tools for the customer's properties in that city/area, then call get_premise_details and check_ev_eligibility for each candidate property. Do not answer generically based only on the current account data."
 
 ### Step 2: Discover the new property
 **Tool:** Any available public-property records tool (e.g., search by owner, recent events, or address)
