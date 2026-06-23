@@ -1,7 +1,7 @@
 import pg from 'pg';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
-import path from 'path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 
 const { Pool } = pg;
 const __filename = fileURLToPath(import.meta.url);
@@ -32,9 +32,22 @@ const pool = new Pool({
   connectionTimeoutMillis: 30000,
 });
 
+async function isBootstrapSchemaApplied() {
+  const result = await pool.query(`
+    SELECT to_regclass('public.users') IS NOT NULL AS schema_exists;
+  `);
+
+  return result.rows[0]?.schema_exists === true;
+}
+
 async function runMigration() {
   try {
     console.log('[Migration] Starting database migration...');
+
+    if (await isBootstrapSchemaApplied()) {
+      console.log('[Migration] Existing schema detected; skipping bootstrap migration');
+      return;
+    }
     
     // Apply schema
     const schemaPath = path.join(__dirname, 'schema.sql');
@@ -59,9 +72,12 @@ async function runMigration() {
 
 // Run migration if this file is executed directly
 if (import.meta.url === `file://${process.argv[1]}`) {
-  runMigration()
-    .then(() => process.exit(0))
-    .catch(() => process.exit(1));
+  try {
+    await runMigration();
+    process.exit(0);
+  } catch {
+    process.exit(1);
+  }
 }
 
 export { runMigration };
