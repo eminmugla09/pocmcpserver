@@ -6,12 +6,11 @@
     "strict": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,
-    "allowJs": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "types": ["node"],
     "outDir": "dist",
-    "rootDir": "."
+    "rootDir": "src"
   },
-  "include": ["src/**/*.ts", "migrate-db.js"]
+  "include": ["src/**/*.ts"]
 }

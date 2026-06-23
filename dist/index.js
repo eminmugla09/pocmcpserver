@@ -6,6 +6,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { z } from "zod";
 import pg from "pg";
 import { verifyToken, getUserCustomerNumbers, hasCustomerAccess } from "./auth.js";
+import { runMigration } from "../migrate-db.js";
 const { Pool } = pg;
 const getDatabaseUrl = () => {
     const rawUrl = process.env.DATABASE_URL ?? "";
@@ -58,6 +59,10 @@ const jsonContent = (payload) => ({
     ]
 });
 const findPremiseByAddress = async (address) => {
+    // Handle null or undefined input
+    if (!address) {
+        return null;
+    }
     // Normalize: lowercase, strip punctuation, abbreviate common street suffixes, collapse spaces
     const normalize = (s) => s.toLowerCase()
         .replace(/\bdrive\b/g, 'dr').replace(/\bstreet\b/g, 'st').replace(/\bavenue\b/g, 'ave')
@@ -285,6 +290,7 @@ const getEvEnrollmentHandler = async ({ account_number }) => {
     }
     return {
         ...enrollment,
+        enrolled: true,
         customerNumber: customerNumber || null,
         registeredVehicles
     };
@@ -728,12 +734,20 @@ const setAutopayHandler = async ({ account_number, payment_method }) => {
      ORDER BY bill_date DESC
      LIMIT 1`, [account_number]);
     const latestBill = latestBillResult.rows[0];
-    await pool.query(`UPDATE billing
+    const updateResult = await pool.query(`UPDATE billing
      SET autopay_enrolled = TRUE,
          next_scheduled_payment_date = $2,
          next_scheduled_payment_amount_usd = $3,
          updated_at = CURRENT_TIMESTAMP
-     WHERE account_number = $1`, [account_number, latestBill?.due_date || null, latestBill?.amount_due || null]);
+     WHERE account_number = $1
+     RETURNING account_number`, [account_number, latestBill?.due_date || null, latestBill?.amount_due || null]);
+    if (updateResult.rowCount === 0) {
+        return {
+            status: "NOT_FOUND",
+            accountNumber: account_number,
+            message: "Billing record not found for account."
+        };
+    }
     if (payment_method) {
         await pool.query(`INSERT INTO payment_methods (account_number, method_type, metadata, updated_at)
        VALUES ($1, $2, $3::jsonb, CURRENT_TIMESTAMP)
@@ -751,12 +765,20 @@ const setAutopayHandler = async ({ account_number, payment_method }) => {
     };
 };
 const cancelAutopayHandler = async ({ account_number }) => {
-    await pool.query(`UPDATE billing
+    const updateResult = await pool.query(`UPDATE billing
      SET autopay_enrolled = FALSE,
          next_scheduled_payment_date = NULL,
          next_scheduled_payment_amount_usd = NULL,
          updated_at = CURRENT_TIMESTAMP
-     WHERE account_number = $1`, [account_number]);
+     WHERE account_number = $1
+     RETURNING account_number`, [account_number]);
+    if (updateResult.rowCount === 0) {
+        return {
+            status: "NOT_FOUND",
+            accountNumber: account_number,
+            message: "Billing record not found for account."
+        };
+    }
     await addAudit("cancel_autopay", { account_number });
     return {
         status: "AUTOPAY_DISABLED",
@@ -792,7 +814,7 @@ const updatePaymentMethodHandler = async ({ account_number, method_type, last4, 
     };
 };
 const requestPaymentExtensionHandler = async ({ account_number, requested_due_date, reason }) => {
-    await pool.query(`UPDATE billing
+    const updateResult = await pool.query(`UPDATE billing
      SET due_date = $2,
          updated_at = CURRENT_TIMESTAMP
      WHERE id = (
@@ -800,7 +822,15 @@ const requestPaymentExtensionHandler = async ({ account_number, requested_due_da
        WHERE account_number = $1
        ORDER BY bill_date DESC
        LIMIT 1
-     )`, [account_number, requested_due_date]);
+     )
+     RETURNING account_number`, [account_number, requested_due_date]);
+    if (updateResult.rowCount === 0) {
+        return {
+            status: "NOT_FOUND",
+            accountNumber: account_number,
+            message: "Billing record not found for account."
+        };
+    }
     await addAudit("request_payment_extension", { account_number, requested_due_date, reason: reason || null });
     return {
         status: "APPROVED",
@@ -2504,7 +2534,7 @@ const handleOAuthRefresh = async (request, response) => {
 };
 const startHttpServer = () => {
     const port = Number(process.env.PORT ?? 3000);
-    createServer(async (request, response) => {
+    const httpServer = createServer(async (request, response) => {
         const startedAt = Date.now();
         const requestId = toSingleHeaderValue(request.headers["x-request-id"]) || makeId("REQ");
         request.headers["x-request-id"] = requestId;
@@ -2573,9 +2603,11 @@ const startHttpServer = () => {
                 writeJson(response, 500, { error: "Internal server error" });
             }
         }
-    }).listen(port, "0.0.0.0", () => {
+    });
+    httpServer.listen(port, "0.0.0.0", () => {
         console.log(`FPL MCP HTTP server listening on port ${port}; endpoint: /mcp`);
     });
+    return httpServer;
 };
 const startStdioServer = async () => {
     const server = createFplMcpServer();
@@ -2583,9 +2615,19 @@ const startStdioServer = async () => {
     await server.connect(transport);
 };
 await ensurePersistenceTables();
-if (process.env.MCP_TRANSPORT === "http" || process.env.PORT) {
-    startHttpServer();
+// Run database migration on startup, but skip if running in test mode
+// Tests will handle migration separately
+if (!process.env.DATABASE_URL?.includes('_test_')) {
+    await runMigration();
 }
-else {
-    await startStdioServer();
+// Only start the server when this file is the runtime entrypoint.
+// Tests set START_SERVER=false to import the module without blocking on stdio.
+if (process.env.START_SERVER !== "false") {
+    if (process.env.MCP_TRANSPORT === "http" || process.env.PORT) {
+        startHttpServer();
+    }
+    else {
+        await startStdioServer();
+    }
 }
+export { pool, createFplMcpServer, getMyAccountOverviewHandler, getCustomerProfileHandler, lookupAccountHandler, getAccountSummaryHandler, getPremiseDetailsHandler, getBillingInquiryHandler, getPaymentHistoryHandler, getUsageHistoryHandler, getEvEnrollmentHandler, checkEvEligibilityHandler, matchPropertyToCustomerHandler, getServiceConnectionQuoteHandler, startServiceConnectionHandler, enrollEvChargingHandler, setMoveIntentHandler, registerVehicleHandler, updateRegisteredVehicleHandler, removeRegisteredVehicleHandler, setAutopayHandler, cancelAutopayHandler, updatePaymentMethodHandler, requestPaymentExtensionHandler, getDisconnectionRiskHandler, startStopTransferServiceHandler, scheduleReconnectHandler, updateServiceStartDateHandler, getServiceOrdersHandler, cancelServiceOrderHandler, getEvChargingSessionsHandler, updateEvEnrollmentPlanHandler, pauseEvEnrollmentHandler, cancelEvEnrollmentHandler, scheduleEvAssessmentHandler, uploadGarageRequirementsStatusHandler, updateContactInfoHandler, updateNotificationPreferencesHandler, setPreferredLanguageHandler, manageAuthorizedUsersHandler, setPaperlessBillingHandler, getRatePlanOptionsHandler, compareRatePlanSavingsHandler, getPeakAlertsHandler, recommendEvChargingWindowHandler, projectedNextBillHandler, createSupportCaseHandler, getCaseStatusHandler, verifyIdentityStepupHandler, auditActivityLogHandler, findAccounts, findPremiseByAddress, findMatchingCustomers, jsonContent, makeId, addAudit, startHttpServer };
