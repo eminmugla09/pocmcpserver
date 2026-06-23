@@ -23,7 +23,7 @@ Show property EV eligibility, display available plans, and **only** offer to sch
 
 **What the AI sees:**
 - Recent purchase: **320 Anchorage Dr, North Palm Beach, FL 33408**
-- **Closing date: 2026-06-20**
+- **Closing date: 2026-07-10**
 
 ### Step 3: Confirm ownership and link to FPL premise
 **Tools:** (optional, in sequence)
@@ -46,14 +46,15 @@ Show property EV eligibility, display available plans, and **only** offer to sch
 - **EV eligibility:** ELIGIBLE
 - **240V garage circuit:** NO — full installation required (~$36/mo)
 - **WiFi at charging location:** yes
-- **ACTION:** Service is inactive. Use `schedule_move_in_service` with `premise_number="60587744"` and `requested_connect_date="2026-06-20"` to schedule power. Do NOT schedule `ev_assessment` or `enroll_ev_charging` yet.
+- **serviceActive:** false
+- **nextAction:** Service is inactive. Proactively offer the customer to schedule move-in electric service with `schedule_move_in_service` using `premise_number="60587744"` and `requested_connect_date="2026-07-10"` (the closing date from the public records tool). Do NOT offer or call `ev_assessment` or `enroll_ev_charging` yet.
 
 **What `check_ev_eligibility` shows:**
 - **eligible:** true
 - **recommended_install_type:** Full installation ($36/mo) — garage has no existing 240V circuit
 - **alternate_install_type:** Equipment-only ($27/mo) — only if a 240V circuit is added first
 - **serviceActive:** false
-- **nextAction:** Call `schedule_move_in_service` first, then `enroll_ev_charging` after activation.
+- **nextAction:** Service is inactive. Proactively offer the customer to schedule move-in electric service with `schedule_move_in_service`, using the closing date from the public records tool as `requested_connect_date`. Do NOT offer or call `schedule_ev_assessment` or `enroll_ev_charging` until power is active.
 
 ---
 
@@ -61,7 +62,7 @@ Show property EV eligibility, display available plans, and **only** offer to sch
 
 > "I found your new home at 320 Anchorage Dr in North Palm Beach. The property is eligible for FPL EVolution Home, but the garage doesn't have a 240V circuit, so the recommended plan is **full installation at $36/month**. The equipment-only plan ($27/month) would only work if a 240V circuit is added first.
 >
-> Since electric service is not active yet, I can schedule power to start on your **closing date, June 20, 2026**. Would you like me to do that? We can't schedule the EV assessment or enrollment until power is connected."
+> Since electric service is not active yet, I can schedule power to start on your **closing date, July 10, 2026**. Would you like me to do that? We can't schedule the EV assessment or enrollment until power is connected."
 
 ---
 
@@ -71,5 +72,5 @@ Show property EV eligibility, display available plans, and **only** offer to sch
 ```json
 {
   "premise_number": "60587744",
-  "requested_connect_date": "2026-06-20"
+  "requested_connect_date": "2026-07-10"
 }

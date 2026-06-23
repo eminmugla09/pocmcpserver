@@ -36,7 +36,7 @@ Identify the customer and see everything linked to them.
 
 ### 3. `get_premise_details`
 - **Args:** `premise_number` **or** `address`
-- **Returns:** `mock_data.premises[...]` — FPL-only property details: property type, service status, smart meter, `evolutionHomeEligible`, `existing240vCircuitInGarage`, WiFi readiness. Does **not** include public-record data (closing date, sale price, parcel ID, etc.) — get those from any available public-property records tool.
+- **Returns:** `mock_data.premises[...]` plus `serviceActive` (boolean) and `nextAction`/`instructions`. FPL-only property details: property type, service status, smart meter, `evolutionHomeEligible`, `existing240vCircuitInGarage`, WiFi readiness. Does **not** include public-record data (closing date, sale price, parcel ID, etc.) — get those from any available public-property records tool. The `nextAction` explicitly tells you whether to proactively offer `schedule_move_in_service` (using the closing date from a public records tool) or proceed with EV eligibility.
 - **Maps to:** `premise_360` / SAP `/tmd Premises`.
 
 ### 4. `get_billing_inquiry`
@@ -62,7 +62,7 @@ Identify the customer and see everything linked to them.
 ### 8. `check_ev_eligibility`
 The differentiator for Scenario 1 — grounds the answer in Emin's actual premise.
 - **Args:** `premise_number`
-- **Returns:** `mock_data.ev_eligibility[premise_number]` — pass/fail per real fpl.com eligibility rule, `recommendedInstallType`, and the gating note ("establish power service first").
+- **Returns:** `mock_data.ev_eligibility[premise_number]` plus `serviceActive` (boolean) and `nextAction`/`instructions`. Pass/fail per real fpl.com eligibility rule, `recommendedInstallType`, and the gating note ("establish power service first"). The `nextAction` is explicit: if `serviceActive` is false, proactively offer `schedule_move_in_service` using the closing date from a public records tool; do not offer EV assessment/enrollment until power is active.
 - **Maps to:** derived from SAP `/ev` + `/tmd` (eligibility logic FPL applies during enrollment).
 
 ### 9. `match_property_to_customer`  ← powers Scenario 2's proactivity
