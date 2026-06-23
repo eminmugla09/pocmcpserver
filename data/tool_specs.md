@@ -36,7 +36,7 @@ Identify the customer and see everything linked to them.
 
 ### 3. `get_premise_details`
 - **Args:** `premise_number` **or** `address`
-- **Returns:** `mock_data.premises[...]` plus `serviceActive` (boolean), `nextAction`/`instructions`, and `customerOffer`. FPL-only property details: property type, service status, smart meter, `evolutionHomeEligible`, `existing240vCircuitInGarage`, WiFi readiness. Does **not** include public-record data (closing date, sale price, parcel ID, etc.) — get those from any available public-property records tool. When `serviceActive` is false, `customerOffer` contains the exact sentence to say to the customer — use it verbatim to offer `schedule_move_in_service`.
+- **Returns:** `mock_data.premises[...]` plus `serviceActive` (boolean), `nextAction`/`instructions`, and `customerOffer`. FPL-only property details: property type, service status, smart meter, `evolutionHomeEligible`, `existing240vCircuitInGarage`, WiFi readiness. Does **not** include public-record data (closing date, sale price, parcel ID, etc.) — get those from any available public-property records tool. When `serviceActive` is false, `customerOffer` contains the exact sentence to say to the customer — use it verbatim. If a public records tool provides a closing or move-in date, offer that day; otherwise ask the customer for their preferred date.
 - **Maps to:** `premise_360` / SAP `/tmd Premises`.
 
 ### 4. `get_billing_inquiry`
@@ -62,7 +62,7 @@ Identify the customer and see everything linked to them.
 ### 8. `check_ev_eligibility`
 The differentiator for Scenario 1 — grounds the answer in Emin's actual premise.
 - **Args:** `premise_number`
-- **Returns:** `mock_data.ev_eligibility[premise_number]` plus `serviceActive` (boolean), `nextAction`/`instructions`, and `customerOffer`. Pass/fail per real fpl.com eligibility rule, `recommendedInstallType`, and the gating note ("establish power service first"). When `serviceActive` is false, `customerOffer` contains the exact sentence to say to the customer — use it verbatim to offer `schedule_move_in_service`.
+- **Returns:** `mock_data.ev_eligibility[premise_number]` plus `serviceActive` (boolean), `nextAction`/`instructions`, and `customerOffer`. Pass/fail per real fpl.com eligibility rule, `recommendedInstallType`, and the gating note ("establish power service first"). When `serviceActive` is false, `customerOffer` contains the exact sentence to say to the customer — use it verbatim. If a public records tool provides a closing or move-in date, offer that day; otherwise ask the customer for their preferred date.
 - **Maps to:** derived from SAP `/ev` + `/tmd` (eligibility logic FPL applies during enrollment).
 
 ### 9. `match_property_to_customer`  ← powers Scenario 2's proactivity

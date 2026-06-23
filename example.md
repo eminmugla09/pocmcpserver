@@ -47,16 +47,16 @@ Show property EV eligibility, display available plans, and **only** offer to sch
 - **240V garage circuit:** NO — full installation required (~$36/mo)
 - **WiFi at charging location:** yes
 - **serviceActive:** false
-- **nextAction:** Service is inactive. Ask the customer the sentence in `customerOffer`, then call `schedule_move_in_service` using `premise_number="60587744"` and `requested_connect_date="2026-07-10"` (the closing date from the public records tool). Do NOT offer or call `ev_assessment` or `enroll_ev_charging` yet.
-- **customerOffer:** "I can schedule FPL electric service at this address to start on your closing date. Would you like me to do that? We can't schedule EV installation until power is active."
+- **nextAction:** Service is inactive. Ask the customer the sentence in `customerOffer`, then call `schedule_move_in_service` using `premise_number="60587744"` and the customer's preferred date (offer the public records closing/move-in date if available). Do NOT offer or call `ev_assessment` or `enroll_ev_charging` yet.
+- **customerOffer:** "I can schedule FPL electric service at this address to start on your preferred date. If you have a closing or move-in date, I'll offer that day; otherwise, what date would you like? We can't schedule EV installation until power is active."
 
 **What `check_ev_eligibility` shows:**
 - **eligible:** true
 - **recommended_install_type:** Full installation ($36/mo) — garage has no existing 240V circuit
 - **alternate_install_type:** Equipment-only ($27/mo) — only if a 240V circuit is added first
 - **serviceActive:** false
-- **nextAction:** Service is inactive. Ask the customer the sentence in `customerOffer`, then call `schedule_move_in_service` with `premise_number="60587744"` and `requested_connect_date` set to the closing date from the public records tool. Do NOT offer or call `schedule_ev_assessment` or `enroll_ev_charging` until power is active.
-- **customerOffer:** "I can schedule FPL electric service at this address to start on your closing date, then set up the EV charger after power is active. Would you like me to schedule the service now?"
+- **nextAction:** Service is inactive. Ask the customer the sentence in `customerOffer`, then call `schedule_move_in_service` with `premise_number="60587744"` and the customer's preferred date (offer the public records closing/move-in date if available). Do NOT offer or call `schedule_ev_assessment` or `enroll_ev_charging` until power is active.
+- **customerOffer:** "I can schedule FPL electric service at this address to start on your preferred date. If you have a closing or move-in date, I'll offer that day; otherwise, what date would you like? Then I'll set up the EV charger after power is active."
 
 ---
 
