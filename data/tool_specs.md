@@ -36,7 +36,7 @@ Identify the customer and see everything linked to them.
 
 ### 3. `get_premise_details`
 - **Args:** `premise_number` **or** `address`
-- **Returns:** `mock_data.premises[...]` — FPL-only property details: property type, service status, smart meter, `evolutionHomeEligible`, `existing240vCircuitInGarage`, WiFi readiness. Does **not** include public-record data (closing date, sale price, parcel ID, etc.) — get those from the public-property records connector.
+- **Returns:** `mock_data.premises[...]` — FPL-only property details: property type, service status, smart meter, `evolutionHomeEligible`, `existing240vCircuitInGarage`, WiFi readiness. Does **not** include public-record data (closing date, sale price, parcel ID, etc.) — get those from any available public-property records tool.
 - **Maps to:** `premise_360` / SAP `/tmd Premises`.
 
 ### 4. `get_billing_inquiry`
@@ -66,8 +66,8 @@ The differentiator for Scenario 1 — grounds the answer in Emin's actual premis
 - **Maps to:** derived from SAP `/ev` + `/tmd` (eligibility logic FPL applies during enrollment).
 
 ### 9. `match_property_to_customer`  ← powers Scenario 2's proactivity
-Links a new-property street address to the FPL customer and premise. Does **not** store or return public-record details (closing date, sale price, parcel ID, etc.) — those come from the public-property records connector.
-- **Args:** `address`, `owner_name` (optional — pass from public-property records to match customers when the premise has no active account)
+Links a new-property street address to the FPL customer and premise. Does **not** store or return public-record details (closing date, sale price, parcel ID, etc.) — those come from any available public-property records tool.
+- **Args:** `address`, `owner_name` (optional — pass from a public records tool to match customers when the premise has no active account)
 - **Returns:** `{ matchedCustomer: "1009988776", matchedCustomerName: "Emin Mugla", premiseNumber: "60587744", event: "CUSTOMER_LINKED_TO_PREMISE", serviceStatus: "Inactive", existingServices: [...], registeredVehicles: [...] }`
 - **Maps to:** external property/home-registration data joined to SAP business partner. This is the "agent reaches out" trigger.
 
@@ -83,7 +83,7 @@ Links a new-property street address to the FPL customer and premise. Does **not*
 ### 11. `schedule_move_in_service` (schedule move-in / closing date)
 - **Args:** `premise_number`, `account_number` (optional), `requested_connect_date` (required — the closing or move-in date)
 - **Returns:** `action_responses.schedule_move_in_service` (same as start_service_connection). Idempotent — returns an existing SUBMITTED order if one already exists for the premise.
-- **Use when:** A customer is purchasing a home and has a closing or move-in date. Use the `closing_date` from the public-property records connector as the `requested_connect_date`.
+- **Use when:** A customer is purchasing a home and has a closing or move-in date. Use the `closing_date` from any available public-property records tool as the `requested_connect_date`.
 - **Maps to:** `move_in` / SAP `/movein` + `/serviceorder`.
 
 ### 12. `enroll_ev_charging`
@@ -124,7 +124,7 @@ custom GPT system instructions:
 > account data rather than giving generic information. Display both EV plans from `check_ev_eligibility`
 > (full vs equipment-only). When the customer is purchasing a home and service is not active yet,
 > **only** proactively offer to schedule move-in electric service with `schedule_move_in_service` using
-> their closing or move-in date from the public-property records connector as `requested_connect_date`.
+> their closing or move-in date from any available public-property records tool as `requested_connect_date`.
 > Do **not** offer or call `schedule_ev_assessment` or `enroll_ev_charging` while service is inactive. After
 > power is active, offer `schedule_ev_assessment` and `enroll_ev_charging`. Proactively ask whether they
 > are moving or keeping both homes.
