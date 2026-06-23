@@ -36,7 +36,7 @@ Identify the customer and see everything linked to them.
 
 ### 3. `get_premise_details`
 - **Args:** `premise_number` **or** `address`
-- **Returns:** `mock_data.premises[...]` plus `serviceActive` (boolean), `nextAction`/`instructions`, and `customerOfferTemplate`. FPL-only property details: property type, service status, smart meter, `evolutionHomeEligible`, `existing240vCircuitInGarage`, WiFi readiness. Does **not** include public-record data (closing date, sale price, parcel ID, etc.) — get those from any available public-property records tool. When `serviceActive` is false, `customerOfferTemplate` contains `[address]` and `[date]` placeholders. Fill in the placeholders using the address and closing/move-in/renting date from the public records tool and say the resulting sentence to the customer. If no date is available, ask the customer for their preferred date.
+- **Returns:** `mock_data.premises[...]` plus `serviceActive` (boolean), `nextAction`/`instructions`, and `customerOfferTemplate`. FPL-only property details: property type, service status, smart meter, `evolutionHomeEligible`, `existing240vCircuitInGarage`, WiFi readiness. Does **not** include public-record data (closing date, sale price, parcel ID, etc.) — get those from any available public-property records tool. When `serviceActive` is false, `customerOfferTemplate` contains `[address]` and `[date]` placeholders and starts with "Congratulations on your new home!" for a home purchase. Fill in the placeholders using the address and closing/move-in/renting date from the public records tool and say the resulting sentence to the customer. If no date is available, ask the customer for their preferred date.
 - **Maps to:** `premise_360` / SAP `/tmd Premises`.
 
 ### 4. `get_billing_inquiry`
@@ -62,7 +62,7 @@ Identify the customer and see everything linked to them.
 ### 8. `check_ev_eligibility`
 The differentiator for Scenario 1 — grounds the answer in Emin's actual premise.
 - **Args:** `premise_number`
-- **Returns:** `mock_data.ev_eligibility[premise_number]` plus `serviceActive` (boolean), `nextAction`/`instructions`, and `customerOfferTemplate`. Pass/fail per real fpl.com eligibility rule, `recommendedInstallType`, and the gating note ("establish power service first"). When `serviceActive` is false, `customerOfferTemplate` contains `[address]` and `[date]` placeholders. Fill in the placeholders using the address and closing/move-in/renting date from the public records tool and say the resulting sentence to the customer. If no date is available, ask the customer for their preferred date.
+- **Returns:** `mock_data.ev_eligibility[premise_number]` plus `serviceActive` (boolean), `nextAction`/`instructions`, and `customerOfferTemplate`. Pass/fail per real fpl.com eligibility rule, `recommendedInstallType`, and the gating note ("establish power service first"). When `serviceActive` is false, `customerOfferTemplate` contains `[address]` and `[date]` placeholders and starts with "Congratulations on your new home!" for a home purchase. Fill in the placeholders using the address and closing/move-in/renting date from the public records tool and say the resulting sentence to the customer. If no date is available, ask the customer for their preferred date.
 - **Maps to:** derived from SAP `/ev` + `/tmd` (eligibility logic FPL applies during enrollment).
 
 ### 9. `match_property_to_customer`  ← powers Scenario 2's proactivity
@@ -82,8 +82,9 @@ Links a new-property street address to the FPL customer and premise. Does **not*
 
 ### 11. `schedule_move_in_service` (schedule move-in / closing date)
 - **Args:** `premise_number`, `account_number` (optional), `requested_connect_date` (required — the closing or move-in date)
-- **Returns:** `action_responses.schedule_move_in_service` (same as start_service_connection). Idempotent — returns an existing SUBMITTED order if one already exists for the premise.
+- **Returns:** `action_responses.schedule_move_in_service` (same as start_service_connection) plus `moveIntentQuestion`. Idempotent — returns an existing SUBMITTED order if one already exists for the premise.
 - **Use when:** A customer is purchasing a home and has a closing or move-in date. Use the `closing_date` from any available public-property records tool as the `requested_connect_date`.
+- **Move intent:** After scheduling, the response includes a `moveIntentQuestion`. If the customer has an active FPL service at another premise, ask the question and call `set_move_intent` to record the choice (`keep_both` or `move_out_existing`). `set_move_intent` does NOT create or cancel any service orders.
 - **Maps to:** `move_in` / SAP `/movein` + `/serviceorder`.
 
 ### 12. `enroll_ev_charging`
@@ -99,8 +100,9 @@ Links a new-property street address to the FPL customer and premise. Does **not*
 - **Maps to:** SAP service order (write).
 
 ### 14. `set_move_intent`
-- **Args:** `keep_both` | `move_out_miami`
-- **Returns:** `action_responses.set_move_intent` — records keep-both, no move-out order.
+- **Args:** `intent`: `keep_both` | `move_out_existing` | `move_out_miami`
+- **Returns:** `action_responses.set_move_intent` — records the customer's choice, no move-out order is created.
+- **Use when:** After `schedule_move_in_service` when the customer has another active FPL premise. Ask the customer if they want to keep the existing service active or schedule a move-out, then call this tool to record the intent. This tool does NOT create or cancel any service orders.
 - **Maps to:** SAP `/nsmo` (move-out) — here just records intent.
 
 ---

@@ -48,8 +48,8 @@ Show property EV eligibility, display available plans, and **only** offer to sch
 - **WiFi at charging location:** yes
 - **serviceActive:** false
 - **nextAction:** Service is inactive. You MUST offer the customer to schedule move-in service. Fill in the `customerOfferTemplate` using the address and date from the public records tool and say the resulting sentence to the customer. If public records has a closing/move-in/renting date, use that date. If no date is available, ask the customer for their preferred date. Then call `schedule_move_in_service` using `premise_number="60587744"` and `requested_connect_date` set to that date. Do NOT offer or call `ev_assessment` or `enroll_ev_charging` yet.
-- **customerOfferTemplate:** "I can schedule FPL electric service at [address] to start on [date]. Would you like me to do that? We can't schedule EV installation until power is active."
-  - Filled example: "I can schedule FPL electric service at 320 Anchorage Dr, North Palm Beach, FL 33408 to start on July 10, 2026. Would you like me to do that? We can't schedule EV installation until power is active."
+- **customerOfferTemplate:** "Congratulations on your new home! I can schedule FPL electric service at [address] to start on [date]. Would you like me to do that? We can't schedule EV installation until power is active."
+  - Filled example: "Congratulations on your new home! I can schedule FPL electric service at 320 Anchorage Dr, North Palm Beach, FL 33408 to start on July 10, 2026. Would you like me to do that? We can't schedule EV installation until power is active."
 
 **What `check_ev_eligibility` shows:**
 - **eligible:** true
@@ -57,14 +57,14 @@ Show property EV eligibility, display available plans, and **only** offer to sch
 - **alternate_install_type:** Equipment-only ($27/mo) — only if a 240V circuit is added first
 - **serviceActive:** false
 - **nextAction:** Service is inactive. You MUST offer the customer to schedule move-in service. Fill in the `customerOfferTemplate` using the address and date from the public records tool and say the resulting sentence to the customer. If public records has a closing/move-in/renting date, use that date. If no date is available, ask the customer for their preferred date. Then call `schedule_move_in_service` with `premise_number="60587744"` and `requested_connect_date` set to that date. Do NOT offer or call `schedule_ev_assessment` or `enroll_ev_charging` until power is active.
-- **customerOfferTemplate:** "I can schedule FPL electric service at [address] to start on [date], then set up the EV charger after power is active. Would you like me to schedule the service now?"
-  - Filled example: "I can schedule FPL electric service at 320 Anchorage Dr, North Palm Beach, FL 33408 to start on July 10, 2026, then set up the EV charger after power is active. Would you like me to schedule the service now?"
+- **customerOfferTemplate:** "Congratulations on your new home! I can schedule FPL electric service at [address] to start on [date], then set up the EV charger after power is active. Would you like me to schedule the service now?"
+  - Filled example: "Congratulations on your new home! I can schedule FPL electric service at 320 Anchorage Dr, North Palm Beach, FL 33408 to start on July 10, 2026, then set up the EV charger after power is active. Would you like me to schedule the service now?"
 
 ---
 
 ## Customer-Facing Response
 
-> "I found your new home at 320 Anchorage Dr in North Palm Beach. The property is eligible for FPL EVolution Home, but the garage doesn't have a 240V circuit, so the recommended plan is **full installation at $36/month**. The equipment-only plan ($27/month) would only work if a 240V circuit is added first.
+> "Congratulations on your new home! I found it at 320 Anchorage Dr in North Palm Beach. The property is eligible for FPL EVolution Home, but the garage doesn't have a 240V circuit, so the recommended plan is **full installation at $36/month**. The equipment-only plan ($27/month) would only work if a 240V circuit is added first.
 >
 > Since electric service is not active yet, I can schedule power to start on your **closing date, July 10, 2026**. Would you like me to do that? We can't schedule the EV assessment or enrollment until power is connected."
 
@@ -78,3 +78,22 @@ Show property EV eligibility, display available plans, and **only** offer to sch
   "premise_number": "60587744",
   "requested_connect_date": "2026-07-10"
 }
+```
+
+**Response includes:**
+- `serviceOrderId`, `scheduledConnectDate`, `message`
+- `moveIntentQuestion`: "If the customer has an active FPL service at another premise, ask: 'Do you want to keep your existing FPL service active, or would you like to schedule a move-out there?'"
+
+**Customer-facing follow-up after scheduling:**
+> "Great, I've scheduled FPL electric service at 320 Anchorage Dr to start on July 10, 2026. You currently have active FPL service in Miami. Would you like to keep that service active, or would you like me to schedule a move-out there?"
+
+## Step 6: Record move intent
+
+**Tool:** `pocmcpserver.set_move_intent`
+```json
+{
+  "intent": "keep_both"
+}
+```
+
+**Note:** `set_move_intent` only records the customer's choice. It does NOT create or cancel any service orders. If the customer chooses `move_out_existing`, you must later confirm the existing premise and stop date before scheduling a stop-service order.
