@@ -1,16 +1,19 @@
 -- Idempotent schema updates for existing databases.
 -- Applied by migrate-db.js on every startup after the bootstrap check.
 
-ALTER TABLE premises ADD COLUMN IF NOT EXISTS recorded_date DATE;
-ALTER TABLE premises ADD COLUMN IF NOT EXISTS closing_date DATE;
-ALTER TABLE premises ADD COLUMN IF NOT EXISTS purchase_date DATE;
-ALTER TABLE premises ADD COLUMN IF NOT EXISTS sale_price DECIMAL(15, 2);
-ALTER TABLE premises ADD COLUMN IF NOT EXISTS assessed_value DECIMAL(15, 2);
-ALTER TABLE premises ADD COLUMN IF NOT EXISTS county VARCHAR(100);
-ALTER TABLE premises ADD COLUMN IF NOT EXISTS parcel_id VARCHAR(50);
-ALTER TABLE premises ADD COLUMN IF NOT EXISTS legal_description TEXT;
-ALTER TABLE premises ADD COLUMN IF NOT EXISTS document_number VARCHAR(50);
-ALTER TABLE premises ADD COLUMN IF NOT EXISTS book_page VARCHAR(50);
-ALTER TABLE premises ADD COLUMN IF NOT EXISTS property_record_source VARCHAR(255);
-ALTER TABLE premises ADD COLUMN IF NOT EXISTS property_record_confidence VARCHAR(20);
-ALTER TABLE premises ADD COLUMN IF NOT EXISTS previous_owner VARCHAR(255);
+-- Public-record fields are intentionally stored in the public-property records
+-- connector, not in the FPL premises table. Drop them if they were previously added.
+ALTER TABLE premises DROP COLUMN IF EXISTS new_owner_on_record;
+ALTER TABLE premises DROP COLUMN IF EXISTS recorded_date;
+ALTER TABLE premises DROP COLUMN IF EXISTS closing_date;
+ALTER TABLE premises DROP COLUMN IF EXISTS purchase_date;
+ALTER TABLE premises DROP COLUMN IF EXISTS sale_price;
+ALTER TABLE premises DROP COLUMN IF EXISTS assessed_value;
+ALTER TABLE premises DROP COLUMN IF EXISTS county;
+ALTER TABLE premises DROP COLUMN IF EXISTS parcel_id;
+ALTER TABLE premises DROP COLUMN IF EXISTS legal_description;
+ALTER TABLE premises DROP COLUMN IF EXISTS document_number;
+ALTER TABLE premises DROP COLUMN IF EXISTS book_page;
+ALTER TABLE premises DROP COLUMN IF EXISTS property_record_source;
+ALTER TABLE premises DROP COLUMN IF EXISTS property_record_confidence;
+ALTER TABLE premises DROP COLUMN IF EXISTS previous_owner;

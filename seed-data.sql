@@ -70,24 +70,12 @@ INSERT INTO premises (premise_number, address_line1, address_city, address_state
 ('81312265', '3456 Orange Blossom Trail', 'Orlando', 'FL', '32803', 'Single-family home with attached 2-car garage', 'Active', NULL, TRUE, '4100556687', TRUE, FALSE)
 ON CONFLICT (premise_number) DO NOTHING;
 
--- Update premise 60587744 with additional fields
-UPDATE premises SET 
-  new_owner_on_record = 'Emin Mugla (per county property/home registration feed, recorded 2026-06-05)',
+-- Update premise 60587744 with FPL-specific readiness fields only.
+-- Public-record data (closing date, sale price, county, parcel ID, etc.)
+-- lives in the public-property records connector, not in the FPL premises table.
+UPDATE premises SET
   strong_wifi_at_charging_location = TRUE,
-  existing_240v_circuit_in_garage = FALSE,
-  recorded_date = '2026-06-05',
-  closing_date = '2026-06-20',
-  purchase_date = '2026-06-20',
-  sale_price = 485000.00,
-  assessed_value = 495000.00,
-  county = 'Palm Beach',
-  parcel_id = '08434507050000870',
-  legal_description = 'LOT 8, BLOCK 15, NORTH PALM BEACH ESTATES, ACCORDING TO PLAT...',
-  document_number = '2026R000321',
-  book_page = '8901-234',
-  property_record_source = 'Palm Beach County Recorder',
-  property_record_confidence = 'high',
-  previous_owner = 'Prior occupant'
+  existing_240v_circuit_in_garage = FALSE
 WHERE premise_number = '60587744';
 
 -- Insert registered vehicles

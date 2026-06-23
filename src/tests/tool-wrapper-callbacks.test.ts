@@ -82,7 +82,7 @@ describe('Registered Tool Wrapper Callback Coverage', () => {
       get_usage_history: { account_number: '5210099001' },
       get_ev_enrollment: { account_number: '5210099001' },
       check_ev_eligibility: { premise_number: '60587744' },
-      match_property_to_customer: { address: '320 Anchorage Dr, North Palm Beach, FL 33408' },
+      match_property_to_customer: { address: '320 Anchorage Dr, North Palm Beach, FL 33408', owner_name: 'Emin Mugla' },
       get_service_connection_quote: { premise_number: '60587744' },
       start_service_connection: { premise_number: '60587744', account_number: '5210099001', requested_connect_date: '2026-08-15' },
       schedule_move_in_service: { premise_number: '80512257', account_number: '5210099001', requested_connect_date: '2026-08-20' },
