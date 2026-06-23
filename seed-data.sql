@@ -5,14 +5,16 @@
 -- Use ON CONFLICT to handle cases where users already exist
 INSERT INTO users (email, password_hash, full_name) VALUES
 ('woarzus@gmail.com', '$2b$10$eYA9eNO8vbNw90aFSFnqqu.zMPRM7W52UGKDQhoG77cKPYT3u3iLe', 'Emin Mugla'),
-('rjvargas87@gmail.com', '$2b$10$PQCIs2gN6MFaUlY1dvPdsORZJdvLvcSz728KTMfthuOqEtgm7JIEC', 'Ricardo Vargas')
+('rjvargas87@gmail.com', '$2b$10$PQCIs2gN6MFaUlY1dvPdsORZJdvLvcSz728KTMfthuOqEtgm7JIEC', 'Ricardo Vargas'),
+('shankaresengupta@gmail.com', '$2b$10$eYA9eNO8vbNw90aFSFnqqu.zMPRM7W52UGKDQhoG77cKPYT3u3iLe', 'Shankar Sengupta')
 ON CONFLICT (email) DO NOTHING;
 
 -- Insert customers
 INSERT INTO customers (customer_number, business_partner_id, first_name, last_name, full_name, email, mobile_phone, preferred_contact_method, preferred_language, customer_since, account_standing_flag)
 VALUES 
   ('1009988776', '1009988776', 'Emin', 'Mugla', 'Emin Mugla', 'woarzus@gmail.com', '954-666-2333', 'Mobile', 'EN', '2018-03-09', 'GOOD'),
-  ('2009988777', '2009988777', 'Ricardo', 'Vargas', 'Ricardo Vargas', 'rjvargas87@gmail.com', '978-430-9223', 'Email', 'EN', '2020-07-15', 'GOOD')
+  ('2009988777', '2009988777', 'Ricardo', 'Vargas', 'Ricardo Vargas', 'rjvargas87@gmail.com', '978-430-9223', 'Email', 'EN', '2020-07-15', 'GOOD'),
+  ('3009988778', '3009988778', 'Shankar', 'Sengupta', 'Shankar Sengupta', 'shankaresengupta@gmail.com', '561-555-0145', 'Mobile', 'EN', '2024-01-15', 'GOOD')
 ON CONFLICT (customer_number) DO NOTHING;
 
 -- Link users to customers (will be updated with actual user IDs after insertion)
@@ -21,13 +23,16 @@ DO $$
 DECLARE
   emin_user_id UUID;
   ricardo_user_id UUID;
+  shankar_user_id UUID;
 BEGIN
   SELECT id INTO emin_user_id FROM users WHERE email = 'woarzus@gmail.com';
   SELECT id INTO ricardo_user_id FROM users WHERE email = 'rjvargas87@gmail.com';
+  SELECT id INTO shankar_user_id FROM users WHERE email = 'shankaresengupta@gmail.com';
   
   INSERT INTO user_customers (user_id, customer_number, is_primary) VALUES
   (emin_user_id, '1009988776', TRUE),
-  (ricardo_user_id, '2009988777', TRUE)
+  (ricardo_user_id, '2009988777', TRUE),
+  (shankar_user_id, '3009988778', TRUE)
   ON CONFLICT (user_id, customer_number) DO NOTHING;
 END $$;
 
@@ -51,7 +56,18 @@ ON CONFLICT (account_number, program_name) DO NOTHING;
 INSERT INTO premises (premise_number, address_line1, address_city, address_state, address_zip, property_type, service_status, active_account_number, smart_meter_flag, meter_installation_number, evolution_home_eligible, evolution_home_enrolled) VALUES
 ('60412233', '1450 Brickell Bay Dr, Apt 1402', 'Miami', 'FL', '33131', 'Single-family / townhouse with attached garage', 'Active - Emin Mugla', '5210099001', TRUE, '4100556677', TRUE, TRUE),
 ('60587744', '320 Anchorage Dr', 'North Palm Beach', 'FL', '33408', 'Single-family home with attached 2-car garage', 'Inactive - prior occupant moved out 2026-05-28; awaiting new owner connect', NULL, TRUE, '4100889900', TRUE, FALSE),
-('70412255', '789 Ocean Dr, Apt 305', 'Fort Lauderdale', 'FL', '33316', 'Condominium with parking garage', 'Active - Ricardo Vargas', '5220099002', TRUE, '4100998811', TRUE, FALSE)
+('70412255', '789 Ocean Dr, Apt 305', 'Fort Lauderdale', 'FL', '33316', 'Condominium with parking garage', 'Active - Ricardo Vargas', '5220099002', TRUE, '4100998811', TRUE, FALSE),
+-- 10 new premises with realistic Florida addresses
+('80412256', '1234 Sunset Blvd', 'Miami', 'FL', '33125', 'Single-family home with attached garage', 'Active', NULL, TRUE, '4100556678', TRUE, FALSE),
+('80512257', '5678 Coral Way', 'Coral Gables', 'FL', '33134', 'Single-family home with attached 2-car garage', 'Inactive', NULL, TRUE, '4100556679', TRUE, FALSE),
+('80612258', '8901 Palmetto Ave', 'West Palm Beach', 'FL', '33401', 'Townhouse with attached garage', 'Active', NULL, TRUE, '4100556680', TRUE, FALSE),
+('80712259', '2345 Ocean Drive', 'Miami Beach', 'FL', '33139', 'Condominium with parking', 'Active', NULL, TRUE, '4100556681', FALSE, FALSE),
+('80812260', '4567 NE 2nd Ave', 'Miami', 'FL', '33137', 'Single-family home with attached garage', 'Active', NULL, TRUE, '4100556682', TRUE, FALSE),
+('80912261', '6789 SW 8th St', 'Miami', 'FL', '33130', 'Single-family home with detached garage', 'Inactive', NULL, TRUE, '4100556683', TRUE, FALSE),
+('81012262', '1234 Hibiscus St', 'Hollywood', 'FL', '33019', 'Single-family home with attached garage', 'Active', NULL, TRUE, '4100556684', TRUE, FALSE),
+('81112263', '5678 Palm Ave', 'Fort Lauderdale', 'FL', '33301', 'Condominium with parking garage', 'Active', NULL, TRUE, '4100556685', FALSE, FALSE),
+('81212264', '8901 Federal Hwy', 'Boca Raton', 'FL', '33431', 'Townhouse with attached garage', 'Inactive', NULL, TRUE, '4100556686', TRUE, FALSE),
+('81312265', '3456 Orange Blossom Trail', 'Orlando', 'FL', '32803', 'Single-family home with attached 2-car garage', 'Active', NULL, TRUE, '4100556687', TRUE, FALSE)
 ON CONFLICT (premise_number) DO NOTHING;
 
 -- Update premise 60587744 with additional fields
