@@ -44,6 +44,15 @@ async function runMigration() {
   try {
     console.log('[Migration] Starting database migration...');
 
+    // Apply idempotent schema updates on every startup so existing databases
+    // pick up new columns without requiring a full bootstrap.
+    const updatesPath = path.join(__dirname, 'schema-updates.sql');
+    if (fs.existsSync(updatesPath)) {
+      const updates = fs.readFileSync(updatesPath, 'utf8');
+      await pool.query(updates);
+      console.log('[Migration] Schema updates applied successfully');
+    }
+
     if (await isBootstrapSchemaApplied()) {
       console.log('[Migration] Existing schema detected; skipping bootstrap migration');
       return;

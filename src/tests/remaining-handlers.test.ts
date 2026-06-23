@@ -344,13 +344,14 @@ describe('Remaining Handler Tests', () => {
   });
 
   describe('EV Assessment', () => {
-    it('should schedule EV assessment', async () => {
+    it('should schedule EV assessment at active premise', async () => {
       if (typeof handlers.scheduleEvAssessmentHandler === 'function') {
         const result = await handlers.scheduleEvAssessmentHandler({
-          premise_number: '60587744',
+          premise_number: '60412233',
           preferred_date: '2026-08-15'
         });
         expect(result).toBeDefined();
+        expect(result.status).toBe('SCHEDULED');
       } else {
         expect(handlers.scheduleEvAssessmentHandler).toBeUndefined();
       }

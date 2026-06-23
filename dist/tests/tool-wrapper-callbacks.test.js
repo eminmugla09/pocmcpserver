@@ -35,7 +35,7 @@ describe('Registered Tool Wrapper Callback Coverage', () => {
         const tools = server._registeredTools;
         expect(tools).toBeDefined();
         const toolNames = Object.keys(tools);
-        expect(toolNames.length).toBe(47);
+        expect(toolNames.length).toBe(48);
         const vehicleRegistration = parseToolText(await tools.register_vehicle.handler({
             customer_number: '1009988776',
             linked_premise: '60587744',
@@ -74,6 +74,7 @@ describe('Registered Tool Wrapper Callback Coverage', () => {
             match_property_to_customer: { address: '320 Anchorage Dr, North Palm Beach, FL 33408' },
             get_service_connection_quote: { premise_number: '60587744' },
             start_service_connection: { premise_number: '60587744', account_number: '5210099001', requested_connect_date: '2026-08-15' },
+            schedule_move_in_service: { premise_number: '80512257', account_number: '5210099001', requested_connect_date: '2026-08-20' },
             enroll_ev_charging: { premise_number: '60587744', account_number: '5210099001', install_type: 'full' },
             set_move_intent: { customer_number: '1009988776', intent: 'keep_both' },
             register_vehicle: {

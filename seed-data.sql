@@ -74,7 +74,20 @@ ON CONFLICT (premise_number) DO NOTHING;
 UPDATE premises SET 
   new_owner_on_record = 'Emin Mugla (per county property/home registration feed, recorded 2026-06-05)',
   strong_wifi_at_charging_location = TRUE,
-  existing_240v_circuit_in_garage = FALSE
+  existing_240v_circuit_in_garage = FALSE,
+  recorded_date = '2026-06-05',
+  closing_date = '2026-06-20',
+  purchase_date = '2026-06-20',
+  sale_price = 485000.00,
+  assessed_value = 495000.00,
+  county = 'Palm Beach',
+  parcel_id = '08434507050000870',
+  legal_description = 'LOT 8, BLOCK 15, NORTH PALM BEACH ESTATES, ACCORDING TO PLAT...',
+  document_number = '2026R000321',
+  book_page = '8901-234',
+  property_record_source = 'Palm Beach County Recorder',
+  property_record_confidence = 'high',
+  previous_owner = 'Prior occupant'
 WHERE premise_number = '60587744';
 
 -- Insert registered vehicles
@@ -91,7 +104,8 @@ VALUES ('5210099001', '60412233', 'FPL EVolution Home', TRUE, FALSE, 'FPLEVH-009
 -- Insert EV eligibility
 INSERT INTO ev_eligibility (premise_number, eligible, owns_single_family_or_townhouse_with_attached_garage, strong_wifi_at_charging_location, active_residential_account_in_good_standing, no_past_due_or_payment_extension, not_business_or_tax_exempt, smart_meter_present, no_pending_connect_disconnect_order, has_240v_circuit_in_garage, recommended_install_type, alternate_install_type, notes)
 VALUES 
-  ('60587744', TRUE, TRUE, TRUE, 'PENDING - power connection not yet established at this premise', TRUE, TRUE, TRUE, TRUE, FALSE, 'Full installation ($36/mo) - garage has no existing 240V circuit', 'Equipment-only ($27/mo) - only if a 240V circuit is added first', 'Eligibility for EVolution Home requires an active residential account in good standing. Establish power service at 320 Anchorage Dr first, then EV enrollment can proceed.'),
+  ('60412233', TRUE, TRUE, TRUE, 'Yes - active residential account 5210099001 in good standing', TRUE, TRUE, TRUE, TRUE, TRUE, 'Equipment-only ($27/mo) - existing 240V circuit and active EV charger at this premise', 'Full installation ($36/mo) - if a new circuit is needed', 'EVOLUTION HOME ELIGIBLE: active residential account in good standing. Existing EV charger is installed. Enrollment can proceed with install_type="equipment_only" or "full" if replacing hardware.'),
+  ('60587744', TRUE, TRUE, TRUE, 'PENDING - power connection not yet established at this premise', TRUE, TRUE, TRUE, TRUE, FALSE, 'Full installation ($36/mo) - garage has no existing 240V circuit', 'Equipment-only ($27/mo) - only if a 240V circuit is added first', 'EVOLUTION HOME ELIGIBLE: this single-family home with attached garage qualifies for full installation. Required first step: call schedule_move_in_service with premise_number="60587744" and requested_connect_date="[closing/move-in date]" to schedule power. After service is active, call enroll_ev_charging with install_type="full" and premise_number="60587744". Garage has no existing 240V circuit, so equipment-only is not appropriate unless a circuit is added first.'),
   ('70412255', FALSE, FALSE, TRUE, 'Yes - account in good standing', TRUE, TRUE, TRUE, TRUE, FALSE, NULL, NULL, 'Condominium parking garage does not qualify for EVolution Home program. Must be single-family home or townhouse with attached garage.')
 ON CONFLICT (premise_number) DO NOTHING;
 

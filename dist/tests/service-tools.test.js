@@ -48,6 +48,31 @@ describe('Service Tools', () => {
         expect(secondResult.duplicate).toBe(true);
         expect(secondResult.serviceOrderId).toBe(firstResult.serviceOrderId);
     });
+    it('should schedule move-in service with a requested connect date', async () => {
+        const result = await handlers.scheduleMoveInServiceHandler({
+            premise_number: '80512257',
+            account_number: '5210099001',
+            requested_connect_date: '2026-07-22'
+        });
+        expect(result).toBeDefined();
+        expect(result.serviceOrderId).toBeDefined();
+        expect(result.status).toBe('SUBMITTED');
+        expect(result.requestedConnectDate).toBeTruthy();
+        expect(new Date(result.requestedConnectDate).toISOString().startsWith('2026-07-22')).toBe(true);
+        expect(result.scheduledConnectDate).toBeTruthy();
+        expect(new Date(result.scheduledConnectDate).toISOString().startsWith('2026-07-22')).toBe(true);
+        expect(result.premiseNumber).toBe('80512257');
+    });
+    it('should fail schedule_move_in_service when requested_connect_date is missing', async () => {
+        const result = await handlers.scheduleMoveInServiceHandler({
+            premise_number: '80512257',
+            account_number: '5210099001'
+        });
+        expect(result).toBeDefined();
+        expect(result.status).toBe('SCHEDULING_FAILED');
+        expect(result.serviceOrderId).toBeNull();
+        expect(result.message).toContain('requested_connect_date is required');
+    });
     it('should start stop transfer service', async () => {
         const result = await handlers.startStopTransferServiceHandler({
             action: 'start',

@@ -25,6 +25,9 @@ describe('EV Tools', () => {
     expect(result).toBeDefined();
     expect(result.eligible).toBe(true);
     expect(result.owns_single_family_or_townhouse_with_attached_garage).toBe(true);
+    expect(result.serviceActive).toBe(false);
+    expect(result.nextAction).toContain('schedule_move_in_service');
+    expect(result.instructions).toContain('schedule_move_in_service');
   });
 
   it('should check EV eligibility for ineligible premise', async () => {
@@ -56,9 +59,23 @@ describe('EV Tools', () => {
     expect(Array.isArray(result.registeredVehicles)).toBe(true);
   });
 
-  it('should enroll in EV charging - full installation', async () => {
+  it('should block EV enrollment when power service is not active', async () => {
     const result = await handlers.enrollEvChargingHandler({
       premise_number: '60587744',
+      account_number: '5210099001',
+      install_type: 'full'
+    });
+
+    expect(result).toBeDefined();
+    expect(result.status).toBe('PENDING_SERVICE_ACTIVATION');
+    expect(result.enrollmentId).toBeNull();
+    expect(result.message).toContain('schedule_move_in_service');
+    expect(result.instructions).toContain('schedule_move_in_service');
+  });
+
+  it('should enroll in EV charging - full installation at active premise', async () => {
+    const result = await handlers.enrollEvChargingHandler({
+      premise_number: '60412233',
       account_number: '5210099001',
       install_type: 'full'
     });
@@ -68,9 +85,9 @@ describe('EV Tools', () => {
     expect(result.status).toBe('ENROLLMENT_STARTED');
   });
 
-  it('should enroll in EV charging - equipment only', async () => {
+  it('should enroll in EV charging - equipment only at active premise', async () => {
     const result = await handlers.enrollEvChargingHandler({
-      premise_number: '60587744',
+      premise_number: '60412233',
       account_number: '5210099001',
       install_type: 'equipment_only'
     });
@@ -187,9 +204,22 @@ describe('EV Tools', () => {
     expect(result.status).toBe('CANCELLED');
   });
 
-  it('should schedule EV assessment', async () => {
+  it('should block EV assessment when power service is not active', async () => {
     const result = await handlers.scheduleEvAssessmentHandler({
       premise_number: '60587744',
+      preferred_date: '2026-07-15'
+    });
+
+    expect(result).toBeDefined();
+    expect(result.status).toBe('PENDING_SERVICE_ACTIVATION');
+    expect(result.assessmentId).toBeNull();
+    expect(result.message).toContain('schedule_move_in_service');
+    expect(result.instructions).toContain('schedule_move_in_service');
+  });
+
+  it('should schedule EV assessment at active premise', async () => {
+    const result = await handlers.scheduleEvAssessmentHandler({
+      premise_number: '60412233',
       preferred_date: '2026-07-15'
     });
 

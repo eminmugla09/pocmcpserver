@@ -169,13 +169,13 @@ describe('MCP Tool Registration and Invocation Tests', () => {
       expect(result).toBeDefined();
     });
 
-    it('should invoke scheduleEvAssessment tool', async () => {
+    it('should invoke scheduleEvAssessment tool at active premise', async () => {
       const result = await handlers.scheduleEvAssessmentHandler({
-        premise_number: '60587744',
+        premise_number: '60412233',
         preferred_date: '2026-08-15'
       });
       expect(result).toBeDefined();
-      expect(result.status).toBeDefined();
+      expect(result.status).toBe('SCHEDULED');
     });
 
     it('should invoke uploadGarageRequirementsStatus tool', async () => {
