@@ -585,6 +585,14 @@ const startServiceConnectionHandler = async (input: any) => {
 
   const order = result.rows[0];
 
+  await addAudit("start_service_connection", {
+    account_number: order.account_number,
+    premise_number: order.premise_number,
+    service_order_id: order.service_order_id,
+    requested_connect_date: order.requested_connect_date,
+    scheduled_connect_date: order.scheduled_connect_date
+  });
+
   return {
     status: order.status,
     serviceOrderId: order.service_order_id,
@@ -1273,20 +1281,57 @@ const updateServiceStartDateHandler = async ({ service_order_id, new_start_date 
 };
 
 const getServiceOrdersHandler = async ({ account_number }: any) => {
-  const result = account_number
-    ? await pool.query('SELECT * FROM service_orders WHERE account_number = $1 ORDER BY created_at DESC', [account_number])
-    : await pool.query('SELECT * FROM service_orders ORDER BY created_at DESC');
+  const params = account_number ? [account_number] : [];
+  const accountFilter = account_number ? 'WHERE account_number = $1' : '';
+  const connectionFilter = account_number ? 'WHERE account_number = $1' : '';
+
+  const result = await pool.query(
+    `SELECT
+       service_order_id,
+       account_number,
+       order_type AS type,
+       from_premise,
+       to_premise,
+       effective_date,
+       status,
+       metadata,
+       created_at,
+       updated_at,
+       cancel_reason,
+       'service_orders' AS source_table
+     FROM service_orders
+     ${accountFilter}
+     UNION ALL
+     SELECT
+       service_order_id,
+       account_number,
+       'move_in' AS type,
+       NULL AS from_premise,
+       premise_number AS to_premise,
+       requested_connect_date AS effective_date,
+       status,
+       NULL AS metadata,
+       created_at,
+       updated_at,
+       NULL AS cancel_reason,
+       'service_connection_orders' AS source_table
+     FROM service_connection_orders
+     ${connectionFilter}
+     ORDER BY created_at DESC`,
+    params
+  );
 
   return result.rows.map((row: any) => ({
     serviceOrderId: row.service_order_id,
     accountNumber: row.account_number,
-    type: row.order_type,
-    fromPremise: row.from_premise,
-    toPremise: row.to_premise,
-    effectiveDate: row.effective_date,
-    status: row.status,
-    cancelReason: row.cancel_reason,
-    metadata: row.metadata,
+    type: row.type,
+    fromPremise: row.from_premise || null,
+    toPremise: row.to_premise || null,
+    effectiveDate: row.effective_date || null,
+    status: row.status || 'SCHEDULED',
+    cancelReason: row.cancel_reason || null,
+    metadata: row.metadata || {},
+    sourceTable: row.source_table,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   }));
@@ -2125,7 +2170,7 @@ server.registerTool(
 server.registerTool(
   "get_service_orders",
   {
-    description: "List all service orders for an account. Do not call this routinely before start_service_connection; start_service_connection is idempotent and will return an existing order if one already exists. Only use this when the user asks about existing orders or when a previous tool response explicitly references a service order that needs inspection.",
+    description: "List all service orders for an account, including move-in/start-service orders (from service_connection_orders) and transfer/reconnect/EV-assessment orders (from service_orders). Do not call this routinely before start_service_connection; start_service_connection is idempotent and will return an existing order if one already exists. Only use this when the user asks about existing orders or when a previous tool response explicitly references a service order that needs inspection.",
     inputSchema: {
       account_number: z.string().optional()
     }
@@ -2808,7 +2853,7 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
         { name: "start_stop_transfer_service", description: "Create a service order to start, stop, or transfer electric service. action must be 'start', 'stop', or 'transfer'. For transfers, provide both from_premise and to_premise. Only call after explicit customer confirmation — stopping service is irreversible until reconnected. account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { action: { type: "string", enum: ["start", "stop", "transfer"] }, account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." }, from_premise: { type: "string" }, to_premise: { type: "string" }, effective_date: { type: "string" } }, required: ["action"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "schedule_reconnect", description: "Schedule a service reconnection after a disconnection. Provide reconnect_date (YYYY-MM-DD). account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." }, reconnect_date: { type: "string" } }, required: ["reconnect_date"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "update_service_start_date", description: "Change the effective date on an existing scheduled service order. Requires service_order_id from get_service_orders.", inputSchema: { type: "object", properties: { service_order_id: { type: "string" }, new_start_date: { type: "string" } }, required: ["service_order_id", "new_start_date"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
-        { name: "get_service_orders", description: "List all service orders for an account. DO NOT call this routinely before start_service_connection; start_service_connection is idempotent and will return an existing order if one already exists. Only use this when the user asks about existing orders or when a previous tool response explicitly references a service order that needs inspection.", inputSchema: { type: "object", properties: { account_number: { type: "string" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+        { name: "get_service_orders", description: "List all service orders for an account, including move-in/start-service orders and transfer/reconnect/EV-assessment orders. DO NOT call this routinely before start_service_connection; start_service_connection is idempotent and will return an existing order if one already exists. Only use this when the user asks about existing orders or when a previous tool response explicitly references a service order that needs inspection.", inputSchema: { type: "object", properties: { account_number: { type: "string" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "cancel_service_order", description: "Cancel a scheduled service order that has not yet been executed. Requires service_order_id. Provide a reason for audit purposes.", inputSchema: { type: "object", properties: { service_order_id: { type: "string" }, reason: { type: "string" } }, required: ["service_order_id"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "get_ev_charging_sessions", description: "Return derived monthly EV charging session history: total kWh, estimated session count, and average kWh per session. Use for questions like 'how much have I charged my car' or 'how many EV sessions last month'. account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." }, months: { type: "number" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "update_ev_enrollment_plan", description: "Change the FPL EVolution Home plan type for an account: 'full' ($36/month, includes electrical install) or 'equipment_only' ($27/month, charger swap only). account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." }, install_type: { type: "string", enum: ["full", "equipment_only"] } }, required: ["install_type"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
