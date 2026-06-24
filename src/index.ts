@@ -305,16 +305,33 @@ const getPremiseDetailsHandler = async ({ premise_number, address }: any) => {
 
   const serviceStatus = premise.service_status || "unknown";
   const serviceActive = !/inactive|pending|awaiting/i.test(serviceStatus);
+
+  const pendingOrder = !serviceActive
+    ? (await pool.query(
+        `SELECT * FROM service_connection_orders
+         WHERE premise_number = $1 AND status = 'SUBMITTED'
+         ORDER BY created_at DESC LIMIT 1`,
+        [premise.premise_number]
+      )).rows[0]
+    : null;
+
   const nextAction = serviceActive
     ? `Service is active at premise ${premise.premise_number}. For EV questions, call check_ev_eligibility next.`
-    : `Service is inactive at premise ${premise.premise_number}. You MUST offer the customer to schedule move-in service. Use the address and date from the public records tool. If public records has a closing/move-in/renting date, say: "Congratulations on your new home! I can schedule FPL electric service at [address] to start on [date]. Would you like me to do that? We can't schedule EV installation until power is active." If no date is available, ask: "Congratulations on your new home! What date would you like FPL electric service to start at [address]?" Then call schedule_move_in_service with premise_number="${premise.premise_number}" and requested_connect_date set to that date.`;
+    : pendingOrder
+      ? `Service is inactive at premise ${premise.premise_number}, but a move-in service order ${pendingOrder.service_order_id} is already SUBMITTED and power is scheduled to be connected on ${pendingOrder.scheduled_connect_date}. Do NOT schedule again. Tell the customer the service is already scheduled and ask if they want to change the date or record move intent for their existing service. If they want to change the date, use update_service_start_date with service_order_id="${pendingOrder.service_order_id}". If they have another active FPL premise, ask about move intent and call set_move_intent.`
+      : `Service is inactive at premise ${premise.premise_number}. You MUST offer the customer to schedule move-in service. Use the address and date from the public records tool. If public records has a closing/move-in/renting date, say: "Congratulations on your new home! I can schedule FPL electric service at [address] to start on [date]. Would you like me to do that? We can't schedule EV installation until power is active." If no date is available, ask: "Congratulations on your new home! What date would you like FPL electric service to start at [address]?" Then call schedule_move_in_service with premise_number="${premise.premise_number}" and requested_connect_date set to that date.`;
   const customerOfferTemplate = serviceActive
     ? ""
-    : "Congratulations on your new home! I can schedule FPL electric service at [address] to start on [date]. Would you like me to do that? We can't schedule EV installation until power is active.";
+    : pendingOrder
+      ? `Good news — a move-in service order is already scheduled for this address. Power will be connected on ${pendingOrder.scheduled_connect_date}. We can set up the EV charger after service is active. Do you want to keep your existing FPL service active, or schedule a move-out there?`
+      : "Congratulations on your new home! I can schedule FPL electric service at [address] to start on [date]. Would you like me to do that? We can't schedule EV installation until power is active.";
 
   return {
     ...premise,
     serviceActive,
+    serviceOrderScheduled: pendingOrder ? true : false,
+    scheduledConnectDate: pendingOrder?.scheduled_connect_date || null,
+    serviceOrderId: pendingOrder?.service_order_id || null,
     nextAction,
     instructions: nextAction,
     customerOfferTemplate
@@ -433,17 +450,34 @@ const checkEvEligibilityHandler = async ({ premise_number }: any) => {
   const serviceActive = !/inactive|pending|awaiting/i.test(serviceStatus);
 
   const recommendedInstallType = (eligibility.recommended_install_type || "").toLowerCase().includes("equipment") ? "equipment_only" : "full";
+
+  const pendingOrder = !serviceActive
+    ? (await pool.query(
+        `SELECT * FROM service_connection_orders
+         WHERE premise_number = $1 AND status = 'SUBMITTED'
+         ORDER BY created_at DESC LIMIT 1`,
+        [premise_number]
+      )).rows[0]
+    : null;
+
   const nextAction = serviceActive
     ? `Service is active. Call enroll_ev_charging with premise_number="${premise_number}" and install_type="${recommendedInstallType}".`
-    : `Service is inactive. You MUST offer the customer to schedule move-in service. Use the address and date from the public records tool. If public records has a closing/move-in/renting date, say: "Congratulations on your new home! I can schedule FPL electric service at [address] to start on [date], then set up the EV charger after power is active. Would you like me to schedule the service now?" If no date is available, ask: "Congratulations on your new home! What date would you like FPL electric service to start at [address]?" Then call schedule_move_in_service with premise_number="${premise_number}" and requested_connect_date set to that date. Do NOT offer or call schedule_ev_assessment or enroll_ev_charging until power is active.`;
+    : pendingOrder
+      ? `Service is inactive, but a move-in service order ${pendingOrder.service_order_id} is already SUBMITTED and power is scheduled to be connected on ${pendingOrder.scheduled_connect_date}. Do NOT schedule again. Tell the customer the service is already scheduled and ask if they want to change the date or record move intent for their existing service. If they want to change the date, use update_service_start_date with service_order_id="${pendingOrder.service_order_id}". If they have another active FPL premise, ask about move intent and call set_move_intent. Do NOT offer or call schedule_ev_assessment or enroll_ev_charging until power is active.`
+      : `Service is inactive. You MUST offer the customer to schedule move-in service. Use the address and date from the public records tool. If public records has a closing/move-in/renting date, say: "Congratulations on your new home! I can schedule FPL electric service at [address] to start on [date], then set up the EV charger after power is active. Would you like me to schedule the service now?" If no date is available, ask: "Congratulations on your new home! What date would you like FPL electric service to start at [address]?" Then call schedule_move_in_service with premise_number="${premise_number}" and requested_connect_date set to that date. Do NOT offer or call schedule_ev_assessment or enroll_ev_charging until power is active.`;
   const customerOfferTemplate = serviceActive
     ? ""
-    : "Congratulations on your new home! I can schedule FPL electric service at [address] to start on [date], then set up the EV charger after power is active. Would you like me to schedule the service now?";
+    : pendingOrder
+      ? `Good news — a move-in service order is already scheduled for this address. Power will be connected on ${pendingOrder.scheduled_connect_date}. We can set up the EV charger after service is active. Do you want to keep your existing FPL service active, or schedule a move-out there?`
+      : "Congratulations on your new home! I can schedule FPL electric service at [address] to start on [date], then set up the EV charger after power is active. Would you like me to schedule the service now?";
 
   return {
     ...eligibility,
     serviceStatus,
     serviceActive,
+    serviceOrderScheduled: pendingOrder ? true : false,
+    scheduledConnectDate: pendingOrder?.scheduled_connect_date || null,
+    serviceOrderId: pendingOrder?.service_order_id || null,
     nextAction,
     instructions: eligibility.notes || nextAction,
     customerOfferTemplate
