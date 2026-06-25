@@ -1882,6 +1882,68 @@ const logEvent = (level, event, details) => {
     }
     console.log(line);
 };
+const MAX_LOG_BODY_CHARS = 10000;
+const summarizeForLog = (value, maxChars = MAX_LOG_BODY_CHARS) => {
+    let text;
+    if (typeof value === "string") {
+        text = value;
+    }
+    else {
+        try {
+            text = JSON.stringify(value);
+        }
+        catch {
+            text = String(value);
+        }
+    }
+    if (text.length > maxChars) {
+        return `${text.slice(0, maxChars)}...[truncated ${text.length - maxChars} chars]`;
+    }
+    return text;
+};
+const parseSseResponseBody = (body) => {
+    const lines = body.split(/\r?\n/);
+    const results = [];
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith("data: ")) {
+            const data = trimmed.slice(6).trim();
+            try {
+                results.push(JSON.parse(data));
+            }
+            catch {
+                results.push(data);
+            }
+        }
+    }
+    if (results.length > 0) {
+        return results;
+    }
+    try {
+        return JSON.parse(body);
+    }
+    catch {
+        return body;
+    }
+};
+const attachResponseBodyCapture = (response) => {
+    const chunks = [];
+    const originalWrite = response.write.bind(response);
+    const originalEnd = response.end.bind(response);
+    response.write = function (chunk, ...args) {
+        if (chunk) {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+        return originalWrite(chunk, ...args);
+    };
+    response.end = function (chunk, ...args) {
+        if (chunk) {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+        return originalEnd(chunk, ...args);
+    };
+    return () => Buffer.concat(chunks).toString("utf8");
+};
 const ACCOUNT_SCOPED_TOOLS = new Set([
     "get_account_summary",
     "get_billing_inquiry",
@@ -1966,6 +2028,24 @@ const privacyPageHtml = `<!doctype html>
 const handleMcpRequest = async (request, response) => {
     setCorsHeaders(response);
     const requestId = toSingleHeaderValue(request.headers["x-request-id"]) || makeId("REQ");
+    const getResponseBody = attachResponseBodyCapture(response);
+    let mcpMethod = "unknown";
+    let mcpToolName = null;
+    let mcpSessionId = "";
+    response.on("finish", () => {
+        const rawBody = getResponseBody();
+        const parsedBody = parseSseResponseBody(rawBody);
+        logEvent("info", "mcp.response.sent", {
+            requestId,
+            mcpMethod,
+            mcpToolName,
+            mcpSessionId,
+            statusCode: response.statusCode,
+            responseBodySize: rawBody.length,
+            responseBody: parsedBody,
+            responseBodyRaw: summarizeForLog(rawBody)
+        });
+    });
     if (request.method === "OPTIONS") {
         response.writeHead(204);
         response.end();
@@ -1988,17 +2068,20 @@ const handleMcpRequest = async (request, response) => {
         request.headers.accept = "application/json, text/event-stream";
     }
     const body = await readRequestBody(request);
-    const mcpMethod = typeof body?.method === "string" ? body.method : "unknown";
-    const mcpToolName = mcpMethod === "tools/call" && typeof body?.params?.name === "string"
+    mcpMethod = typeof body?.method === "string" ? body.method : "unknown";
+    mcpToolName = mcpMethod === "tools/call" && typeof body?.params?.name === "string"
         ? body.params.name
         : null;
-    const mcpSessionId = toSingleHeaderValue(request.headers["mcp-session-id"]);
+    mcpSessionId = toSingleHeaderValue(request.headers["mcp-session-id"]);
     logEvent("info", "mcp.request.received", {
         requestId,
         mcpMethod,
         mcpToolName,
         mcpSessionId,
-        hasAuthHeader: Boolean(request.headers.authorization)
+        hasAuthHeader: Boolean(request.headers.authorization),
+        requestBody: body,
+        jsonrpcId: body?.id ?? null,
+        clientInfo: body?.params?.clientInfo ?? null
     });
     const logMcpError = (statusCode, code, message) => {
         logEvent("warn", "mcp.request.error", {
