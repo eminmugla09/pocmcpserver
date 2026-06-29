@@ -512,11 +512,13 @@ describe('Remaining Handler Tests', () => {
       if (typeof handlers.setMoveIntentHandler === 'function') {
         const result = await handlers.setMoveIntentHandler({
           customer_number: '1009988776',
-          intent: 'move_only',
+          intent: 'move_out_existing',
           from_premise: '60587744',
-          to_premise: '60587745'
+          to_premise: '60587745',
+          move_out_date: '2026-07-10'
         });
         expect(result).toBeDefined();
+        expect(result.message).toContain('2026-07-10');
       } else {
         expect(handlers.setMoveIntentHandler).toBeUndefined();
       }
