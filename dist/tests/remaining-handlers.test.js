@@ -126,6 +126,104 @@ describe('Remaining Handler Tests', () => {
             expect(result.status).toBe('UPDATED');
         });
     });
+    describe('Proactive Notifications', () => {
+        it('should subscribe and create bill threshold notifications through scheduled checks', async () => {
+            const subscription = await handlers.subscribeProactiveNotificationsHandler({
+                customer_number: '1009988776',
+                account_number: '5210099001',
+                monitor_type: 'bill_projection_threshold',
+                channel: 'email',
+                frequency_minutes: 1,
+                threshold_usd: 100
+            });
+            expect(subscription).toBeDefined();
+            expect(subscription.status).toBe('SUBSCRIBED');
+            const check = await handlers.runScheduledNotificationChecksHandler({
+                customer_number: '1009988776',
+                account_number: '5210099001'
+            });
+            expect(check).toBeDefined();
+            expect(check.status).toBe('CHECKED');
+            expect(check.notificationsCreated).toBeGreaterThanOrEqual(1);
+            const notifications = await handlers.getProactiveNotificationsHandler({
+                customer_number: '1009988776',
+                account_number: '5210099001'
+            });
+            expect(Array.isArray(notifications)).toBe(true);
+            expect(notifications.some((notification) => notification.eventType === 'bill_projection_threshold')).toBe(true);
+        });
+        it('should create outage restoration notifications from event updates', async () => {
+            const result = await handlers.upsertOutageStatusHandler({
+                outage_event_id: 'OUTAGE-TEST-001',
+                premise_number: '60412233',
+                status: 'estimated_restoration',
+                cause: 'weather',
+                estimated_restoration_at: '2026-06-29T23:30:00Z',
+                affected_customers: 120
+            });
+            expect(result).toBeDefined();
+            expect(result.status).toBe('UPSERTED');
+            expect(result.notificationsCreated).toBeGreaterThanOrEqual(1);
+            const notifications = await handlers.getProactiveNotificationsHandler({
+                customer_number: '1009988776',
+                account_number: '5210099001'
+            });
+            expect(notifications.some((notification) => notification.eventType === 'outage_restoration')).toBe(true);
+        });
+        it('should create service request status notifications through scheduled checks', async () => {
+            await handlers.startStopTransferServiceHandler({
+                action: 'start',
+                account_number: '5210099001',
+                to_premise: '60587744',
+                effective_date: '2026-07-15'
+            });
+            const subscription = await handlers.subscribeProactiveNotificationsHandler({
+                customer_number: '1009988776',
+                account_number: '5210099001',
+                monitor_type: 'service_request_status',
+                channel: 'email',
+                frequency_minutes: 1
+            });
+            expect(subscription.status).toBe('SUBSCRIBED');
+            const check = await handlers.runScheduledNotificationChecksHandler({
+                customer_number: '1009988776',
+                account_number: '5210099001'
+            });
+            expect(check.status).toBe('CHECKED');
+            expect(check.notifications.some((notification) => notification.event_type === 'service_request_status')).toBe(true);
+        });
+        it('should report outage and include known restoration estimate when an outage exists', async () => {
+            await handlers.upsertOutageStatusHandler({
+                outage_event_id: 'OUTAGE-TEST-REPORT-001',
+                premise_number: '60412233',
+                status: 'estimated_restoration',
+                cause: 'equipment',
+                estimated_restoration_at: '2026-06-30T01:00:00Z',
+                affected_customers: 80
+            });
+            const result = await handlers.reportOutageHandler({
+                account_number: '5210099001',
+                description: 'Customer says power is out.'
+            });
+            expect(result.status).toBe('REPORTED');
+            expect(result.outageFound).toBe(true);
+            expect(result.estimatedRestorationAt).toBeDefined();
+            expect(result.supportCase).toBeDefined();
+            expect(result.supportCase.category).toBe('outage');
+            expect(result.supportCase.priority).toBe('high');
+        });
+        it('should report outage and create ticket when no outage record exists', async () => {
+            const result = await handlers.reportOutageHandler({
+                account_number: '5220099002',
+                description: 'Customer says power is out.'
+            });
+            expect(result.status).toBe('REPORTED');
+            expect(result.outageFound).toBe(false);
+            expect(result.supportCase).toBeDefined();
+            expect(result.supportCase.category).toBe('outage');
+            expect(result.supportCase.priority).toBe('high');
+        });
+    });
     describe('Authorized Users', () => {
         it('should manage authorized users - list', async () => {
             if (typeof handlers.manageAuthorizedUsersHandler === 'function') {
