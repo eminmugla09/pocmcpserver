@@ -235,7 +235,10 @@ const getMyAccountOverviewHandler = async (userId: string, email: string) => {
     account: accountsData[0],
     billing: accountsData[0]?.billing ?? null,
     allAccounts: ucResult.rows.map((r: any) => r.account_number),
-    proactiveNextSteps: "If the user mentioned a new city, area, move, new home, or EV service at a different location from the linked accounts, you MUST search available public-property records tools for the customer's properties in that city/area, then call get_premise_details and check_ev_eligibility for each candidate property. Do not answer generically based only on the current account data."
+    activeServiceAddresses: accountsData
+      .filter((account: any) => account.status === "Active")
+      .map((account: any) => account.serviceAddress),
+    proactiveNextSteps: "If the user mentioned a new city, area, move, new home, or EV service at a different location from the linked accounts, you MUST search available public-property records tools for the customer's properties in that city/area, then call get_premise_details and check_ev_eligibility for each candidate property. Do not answer generically based only on the current account data. If scheduling service at a new address and this overview includes activeServiceAddresses, ask whether the customer wants to keep the existing active service before calling schedule_move_in_service. Do not say 'premise' or show internal premise numbers to the customer."
   };
 };
 
@@ -272,7 +275,7 @@ const lookupAccountHandler = async (input: any) => {
   if (accounts.length === 0) {
     return {
       found: false,
-      message: "No matching account found. Ask the customer for one lookup value: phone number, email address, account number, customer number, premise number, or service address. For voice, ask one question at a time."
+      message: "No matching account found. Ask the customer for one lookup value: phone number, email address, account number, customer number, or service address. For voice, ask one question at a time."
     };
   }
 
@@ -316,15 +319,15 @@ const getPremiseDetailsHandler = async ({ premise_number, address }: any) => {
     : null;
 
   const nextAction = serviceActive
-    ? `Service is active at premise ${premise.premise_number}. For EV questions, call check_ev_eligibility next.`
+    ? `Service is active for this address. For EV questions, call check_ev_eligibility next. Do not say "premise" or show internal premise numbers to the customer.`
     : pendingOrder
-      ? `Service is inactive at premise ${premise.premise_number}, but a move-in service order ${pendingOrder.service_order_id} is already SUBMITTED and power is scheduled to be connected on ${pendingOrder.scheduled_connect_date}. Do NOT schedule again. Tell the customer the service is already scheduled and ask if they want to change the date or record move intent for their existing service. If they want to change the date, use update_service_start_date with service_order_id="${pendingOrder.service_order_id}". If they have another active FPL premise, ask about move intent and call set_move_intent.`
-      : `Service is inactive at premise ${premise.premise_number}. You MUST offer the customer to schedule move-in service. Use the address and date from the public records tool. If public records has a closing/move-in/renting date, say: "Congratulations on your new home! I can schedule FPL electric service at [address] to start on [date]. Would you like me to do that? We can't schedule EV installation until power is active." If no date is available, ask: "Congratulations on your new home! What date would you like FPL electric service to start at [address]?" Then call schedule_move_in_service with premise_number="${premise.premise_number}" and requested_connect_date set to that date.`;
+      ? `Service is inactive for this address, but a move-in service order ${pendingOrder.service_order_id} is already SUBMITTED and power is scheduled to be connected on ${pendingOrder.scheduled_connect_date}. Do NOT schedule again. Tell the customer the service is already scheduled. If they have another active FPL service address from get_my_account_overview, ask: "You also currently have active FPL service at [existing_service_address]. Do you want to keep that service active, or are you moving from that address?" If they want to change the date, use update_service_start_date with service_order_id="${pendingOrder.service_order_id}". Do not say "premise" or show internal premise numbers to the customer.`
+      : `Service is inactive for this address. You MUST offer the customer to schedule move-in service, but ask about any existing active FPL service address before calling schedule_move_in_service. Use the address and date from the public records tool. If get_my_account_overview shows another active service address, say: "Congratulations on your new home! I can schedule FPL electric service at [address] to start on [date]. You also currently have active FPL service at [existing_service_address]. Do you want to keep your existing FPL service active, or are you moving from that address? We can't schedule EV installation until power is active." If there is no other active service address, say: "Congratulations on your new home! I can schedule FPL electric service at [address] to start on [date]. Would you like me to do that? We can't schedule EV installation until power is active." If no date is available, ask for the preferred service start date. Only call schedule_move_in_service after the customer confirms the address, date, and existing-service choice. Do not say "premise" or show internal premise numbers to the customer. Use premise_number="${premise.premise_number}" only as the internal tool argument.`;
   const customerOfferTemplate = serviceActive
     ? ""
     : pendingOrder
-      ? `Good news — a move-in service order is already scheduled for this address. Power will be connected on ${pendingOrder.scheduled_connect_date}. We can set up the EV charger after service is active. Do you want to keep your existing FPL service active, or schedule a move-out there?`
-      : "Congratulations on your new home! I can schedule FPL electric service at [address] to start on [date]. Would you like me to do that? We can't schedule EV installation until power is active.";
+      ? `Good news — electric service is already scheduled for this address on ${pendingOrder.scheduled_connect_date}. We can set up the EV charger after service is active. You also currently have active FPL service at [existing_service_address]. Do you want to keep that service active, or are you moving from that address?`
+      : "Congratulations on your new home! I can schedule FPL electric service at [address] to start on [date]. You also currently have active FPL service at [existing_service_address]. Do you want to keep your existing FPL service active, or are you moving from that address? We can't schedule EV installation until power is active.";
 
   return {
     ...premise,
@@ -461,15 +464,15 @@ const checkEvEligibilityHandler = async ({ premise_number }: any) => {
     : null;
 
   const nextAction = serviceActive
-    ? `Service is active. Call enroll_ev_charging with premise_number="${premise_number}" and install_type="${recommendedInstallType}".`
+    ? `Service is active. Call enroll_ev_charging with premise_number="${premise_number}" and install_type="${recommendedInstallType}" as internal arguments only. Do not say "premise" or show internal premise numbers to the customer.`
     : pendingOrder
-      ? `Service is inactive, but a move-in service order ${pendingOrder.service_order_id} is already SUBMITTED and power is scheduled to be connected on ${pendingOrder.scheduled_connect_date}. Do NOT schedule again. Tell the customer the service is already scheduled and ask if they want to change the date or record move intent for their existing service. If they want to change the date, use update_service_start_date with service_order_id="${pendingOrder.service_order_id}". If they have another active FPL premise, ask about move intent and call set_move_intent. Do NOT offer or call schedule_ev_assessment or enroll_ev_charging until power is active.`
-      : `Service is inactive. You MUST offer the customer to schedule move-in service. Use the address and date from the public records tool. If public records has a closing/move-in/renting date, say: "Congratulations on your new home! I can schedule FPL electric service at [address] to start on [date], then set up the EV charger after power is active. Would you like me to schedule the service now?" If no date is available, ask: "Congratulations on your new home! What date would you like FPL electric service to start at [address]?" Then call schedule_move_in_service with premise_number="${premise_number}" and requested_connect_date set to that date. Do NOT offer or call schedule_ev_assessment or enroll_ev_charging until power is active.`;
+      ? `Service is inactive for this address, but a move-in service order ${pendingOrder.service_order_id} is already SUBMITTED and power is scheduled to be connected on ${pendingOrder.scheduled_connect_date}. Do NOT schedule again. Tell the customer the service is already scheduled. If they have another active FPL service address from get_my_account_overview, ask: "You also currently have active FPL service at [existing_service_address]. Do you want to keep that service active, or are you moving from that address?" If they want to change the date, use update_service_start_date with service_order_id="${pendingOrder.service_order_id}". Do NOT offer or call schedule_ev_assessment or enroll_ev_charging until power is active. Do not say "premise" or show internal premise numbers to the customer.`
+      : `Service is inactive for this address. You MUST offer the customer to schedule move-in service, but ask about any existing active FPL service address before calling schedule_move_in_service. Use the address and date from the public records tool. If get_my_account_overview shows another active service address, say: "Congratulations on your new home! I can schedule FPL electric service at [address] to start on [date], then set up the EV charger after power is active. You also currently have active FPL service at [existing_service_address]. Do you want to keep your existing FPL service active, or are you moving from that address?" If there is no other active service address, say: "Congratulations on your new home! I can schedule FPL electric service at [address] to start on [date], then set up the EV charger after power is active. Would you like me to schedule the service now?" If no date is available, ask for the preferred service start date. Only call schedule_move_in_service after the customer confirms the address, date, and existing-service choice. Do NOT offer or call schedule_ev_assessment or enroll_ev_charging until power is active. Do not say "premise" or show internal premise numbers to the customer. Use premise_number="${premise_number}" only as the internal tool argument.`;
   const customerOfferTemplate = serviceActive
     ? ""
     : pendingOrder
-      ? `Good news — a move-in service order is already scheduled for this address. Power will be connected on ${pendingOrder.scheduled_connect_date}. We can set up the EV charger after service is active. Do you want to keep your existing FPL service active, or schedule a move-out there?`
-      : "Congratulations on your new home! I can schedule FPL electric service at [address] to start on [date], then set up the EV charger after power is active. Would you like me to schedule the service now?";
+      ? `Good news — electric service is already scheduled for this address on ${pendingOrder.scheduled_connect_date}. We can set up the EV charger after service is active. You also currently have active FPL service at [existing_service_address]. Do you want to keep that service active, or are you moving from that address?`
+      : "Congratulations on your new home! I can schedule FPL electric service at [address] to start on [date], then set up the EV charger after power is active. You also currently have active FPL service at [existing_service_address]. Do you want to keep your existing FPL service active, or are you moving from that address?";
 
   return {
     ...eligibility,
@@ -576,7 +579,7 @@ const startServiceConnectionHandler = async (input: any) => {
       scheduledConnectDate: order.scheduled_connect_date,
       connectionFeeUsd: quote.connection_fee_usd ?? null,
       rateClass: quote.rate_class || null,
-      message: `ALREADY SUBMITTED — do NOT call start_service_connection again. Service order ${order.service_order_id} is already active for this premise. The premise service_status will update when power is connected. Next step: wait for activation, then call enroll_ev_charging.`,
+      message: `ALREADY SUBMITTED — do NOT call start_service_connection again. Service order ${order.service_order_id} is already active for this service address. The service status will update when power is connected. Next step: wait for activation, then call enroll_ev_charging.`,
       createdAt: order.created_at,
       duplicate: true
     };
@@ -591,7 +594,7 @@ const startServiceConnectionHandler = async (input: any) => {
   const scheduledConnectDate = input.requested_connect_date
     || (quoteDate && quoteDate >= today ? quoteDate : today);
 
-  let depositSummary = "Deposit status was not available for this premise.";
+  let depositSummary = "Deposit status was not available for this service address.";
   if (quote.found !== false && quote.deposit_required) {
     depositSummary = `Deposit may be required: ${quote.deposit_reason || "reason not specified"}.`;
   }
@@ -601,7 +604,7 @@ const startServiceConnectionHandler = async (input: any) => {
   }
 
   const serviceOrderId = makeId("SO");
-  const message = `New residential power connection submitted for the resolved premise. ${depositSummary}`;
+  const message = `New residential power connection submitted for the resolved service address. ${depositSummary}`;
   const result = await pool.query(
     `INSERT INTO service_connection_orders
       (service_order_id, premise_number, account_number, requested_connect_date, scheduled_connect_date, status, message)
@@ -637,7 +640,7 @@ const startServiceConnectionHandler = async (input: any) => {
     scheduledConnectDate: order.scheduled_connect_date,
     connectionFeeUsd: quote.connection_fee_usd ?? null,
     rateClass: quote.rate_class || null,
-    message: `${order.message} Service order ${order.service_order_id} is now SUBMITTED. Do NOT call start_service_connection again for this premise. Power is scheduled to be connected on ${order.scheduled_connect_date}. After service is active, call enroll_ev_charging with premise_number="${order.premise_number}" and install_type="full".`,
+    message: `${order.message} Service order ${order.service_order_id} is now SUBMITTED. Do NOT call start_service_connection again for this service address. Power is scheduled to be connected on ${order.scheduled_connect_date}. After service is active, call enroll_ev_charging with premise_number="${order.premise_number}" and install_type="full" as internal arguments only.`,
     createdAt: order.created_at
   };
 };
@@ -652,7 +655,7 @@ const scheduleMoveInServiceHandler = async (input: any) => {
       requestedConnectDate: null,
       scheduledConnectDate: null,
       message: "requested_connect_date is required to schedule move-in service. Please provide the customer's closing or move-in date.",
-      moveIntentQuestion: "If the customer has an active FPL service at another premise, ask: 'Do you want to keep your existing FPL service active, or would you like to schedule a move-out there?'",
+      moveIntentQuestion: "If the customer has active FPL service at another address, ask before scheduling: 'You also currently have active FPL service at [existing_service_address]. Do you want to keep that service active, or are you moving from that address?'",
       createdAt: new Date().toISOString()
     };
   }
@@ -660,7 +663,7 @@ const scheduleMoveInServiceHandler = async (input: any) => {
   const result = await startServiceConnectionHandler(input);
   return {
     ...result,
-    moveIntentQuestion: "If the customer has an active FPL service at another premise, ask: 'Do you want to keep your existing FPL service active, or would you like to schedule a move-out there?'"
+    moveIntentQuestion: "If the customer has active FPL service at another address, ask before scheduling: 'You also currently have active FPL service at [existing_service_address]. Do you want to keep that service active, or are you moving from that address?'"
   };
 };
 
@@ -679,7 +682,7 @@ const enrollEvChargingHandler = async (input: any) => {
       recommendedInstallType: eligibility.recommended_install_type || null,
       nextStep: "No enrollment created.",
       estimatedCompletion: "N/A",
-      message: `This premise is not eligible for FPL EVolution Home enrollment. No enrollment order was created.`,
+      message: `This service address is not eligible for FPL EVolution Home enrollment. No enrollment order was created.`,
       instructions: eligibility.notes || "Check eligibility details above."
     };
   }
@@ -696,7 +699,7 @@ const enrollEvChargingHandler = async (input: any) => {
       recommendedInstallType: eligibility.recommended_install_type || null,
       nextStep: "Start electric service first.",
       estimatedCompletion: "After power service is activated.",
-      message: `EV enrollment cannot be completed because power service is not active at this premise. Call schedule_move_in_service with premise_number="${input.premise_number}" and requested_connect_date="[closing/move-in date]" first, then call enroll_ev_charging again after activation.`,
+      message: `EV enrollment cannot be completed because power service is not active at this service address. Call schedule_move_in_service with premise_number="${input.premise_number}" and requested_connect_date="[closing/move-in date]" as internal arguments first, then call enroll_ev_charging again after activation.`,
       instructions: eligibility.notes || `Call schedule_move_in_service with premise_number="${input.premise_number}" and requested_connect_date="[closing/move-in date]" first.`
     };
   }
@@ -714,7 +717,7 @@ const enrollEvChargingHandler = async (input: any) => {
   const estimatedCompletion = input.install_type === "full"
     ? "Estimated after electrical assessment and permitting."
     : "Estimated after equipment review and scheduling.";
-  const message = `Started FPL EVolution Home enrollment for the resolved premise using ${installType.toLowerCase()} at $${monthlyCharge}/month.${readinessNote}`;
+  const message = `Started FPL EVolution Home enrollment for the resolved service address using ${installType.toLowerCase()} at $${monthlyCharge}/month.${readinessNote}`;
   const result = await pool.query(
     `INSERT INTO ev_enrollment_orders
       (enrollment_id, premise_number, account_number, install_type, monthly_charge, next_step, estimated_completion, status, message)
@@ -752,8 +755,8 @@ const enrollEvChargingHandler = async (input: any) => {
 
 const setMoveIntentHandler = async (input: any) => {
   const message = input.intent === "keep_both"
-    ? "Noted that you intend to keep your existing service active while starting service at the new premise. No move-out order was created."
-    : "Noted that you intend to move out of an existing premise. No stop-service order is created until the existing premise and stop date are explicitly confirmed.";
+    ? "Noted that you intend to keep your existing service active while starting service at the new address. No move-out order was created."
+    : "Noted that you intend to move out of an existing address. No stop-service order is created until the existing address and stop date are explicitly confirmed.";
   const result = await pool.query(
     `INSERT INTO move_intents (customer_number, intent, message)
      VALUES ($1, $2, $3)
@@ -950,6 +953,53 @@ const ensurePersistenceTables = async () => {
       billing_channel TEXT NOT NULL,
       outage_channel TEXT NOT NULL,
       marketing_opt_in BOOLEAN DEFAULT FALSE,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS proactive_notification_subscriptions (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      customer_number TEXT NOT NULL,
+      account_number TEXT,
+      monitor_type TEXT NOT NULL,
+      channel TEXT NOT NULL,
+      frequency_minutes INTEGER NOT NULL DEFAULT 60,
+      threshold_usd DECIMAL(10, 2),
+      enabled BOOLEAN NOT NULL DEFAULT TRUE,
+      last_checked_at TIMESTAMP WITH TIME ZONE,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS proactive_notifications (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      subscription_id UUID,
+      customer_number TEXT NOT NULL,
+      account_number TEXT,
+      event_type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      message TEXT NOT NULL,
+      severity TEXT NOT NULL DEFAULT 'info',
+      status TEXT NOT NULL DEFAULT 'PENDING',
+      payload JSONB,
+      dedupe_key TEXT UNIQUE,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      delivered_at TIMESTAMP WITH TIME ZONE
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS outage_events (
+      outage_event_id TEXT PRIMARY KEY,
+      premise_number TEXT NOT NULL,
+      status TEXT NOT NULL,
+      cause TEXT,
+      estimated_restoration_at TIMESTAMP WITH TIME ZONE,
+      actual_restoration_at TIMESTAMP WITH TIME ZONE,
+      affected_customers INTEGER,
       updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );
   `);
@@ -1485,7 +1535,7 @@ const scheduleEvAssessmentHandler = async ({ premise_number, preferred_date }: a
       assessmentId: null,
       premiseNumber: premise_number,
       preferredDate: preferred_date || null,
-      message: `EV assessment cannot be scheduled because power service is not active at this premise. Schedule electric service first with schedule_move_in_service(premise_number="${premise_number}", requested_connect_date="[closing/move-in date]"). After power is active, schedule the EV assessment.`,
+      message: `EV assessment cannot be scheduled because power service is not active at this service address. Schedule electric service first with schedule_move_in_service(premise_number="${premise_number}", requested_connect_date="[closing/move-in date]") as internal arguments. After power is active, schedule the EV assessment.`,
       instructions: `Call schedule_move_in_service with premise_number="${premise_number}" and requested_connect_date="[closing/move-in date]" first.`
     };
   }
@@ -1739,6 +1789,246 @@ const projectedNextBillHandler = async ({ account_number }: any) => {
   };
 };
 
+const createProactiveNotification = async ({ subscriptionId, customerNumber, accountNumber, eventType, title, message, severity, payload, dedupeKey }: any) => {
+  const result = await pool.query(
+    `INSERT INTO proactive_notifications
+      (subscription_id, customer_number, account_number, event_type, title, message, severity, payload, dedupe_key)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
+     ON CONFLICT (dedupe_key) DO NOTHING
+     RETURNING id, subscription_id, customer_number, account_number, event_type, title, message, severity, status, payload, created_at`,
+    [
+      subscriptionId || null,
+      customerNumber,
+      accountNumber || null,
+      eventType,
+      title,
+      message,
+      severity || "info",
+      JSON.stringify(payload || {}),
+      dedupeKey
+    ]
+  );
+
+  return result.rows[0] || null;
+};
+
+const subscribeProactiveNotificationsHandler = async ({ customer_number, account_number, monitor_type, channel, frequency_minutes, threshold_usd }: any) => {
+  const result = await pool.query(
+    `INSERT INTO proactive_notification_subscriptions
+      (customer_number, account_number, monitor_type, channel, frequency_minutes, threshold_usd, enabled)
+     VALUES ($1, $2, $3, $4, $5, $6, TRUE)
+     RETURNING id, customer_number, account_number, monitor_type, channel, frequency_minutes, threshold_usd, enabled, created_at`,
+    [customer_number, account_number || null, monitor_type, channel || "email", frequency_minutes || 60, threshold_usd || null]
+  );
+
+  await addAudit("subscribe_proactive_notifications", { customer_number, account_number: account_number || null, monitor_type });
+  const subscription = result.rows[0];
+  return {
+    status: "SUBSCRIBED",
+    subscriptionId: subscription.id,
+    customerNumber: subscription.customer_number,
+    accountNumber: subscription.account_number,
+    monitorType: subscription.monitor_type,
+    channel: subscription.channel,
+    frequencyMinutes: subscription.frequency_minutes,
+    thresholdUsd: subscription.threshold_usd,
+    enabled: subscription.enabled,
+    createdAt: subscription.created_at,
+    message: "Customer-authorized proactive monitoring is active. A scheduled job can call run_scheduled_notification_checks to create notifications."
+  };
+};
+
+const getProactiveNotificationsHandler = async ({ customer_number, account_number, status, limit }: any) => {
+  const maxItems = Math.min(Math.max(Number(limit || 20), 1), 100);
+  const result = await pool.query(
+    `SELECT id, subscription_id, customer_number, account_number, event_type, title, message, severity, status, payload, created_at, delivered_at
+     FROM proactive_notifications
+     WHERE ($1::text = '' OR customer_number = $1)
+       AND ($2::text = '' OR account_number = $2)
+       AND ($3::text = '' OR status = $3)
+     ORDER BY created_at DESC
+     LIMIT $4`,
+    [customer_number || '', account_number || '', status || '', maxItems]
+  );
+
+  return result.rows.map((row: any) => ({
+    id: row.id,
+    subscriptionId: row.subscription_id,
+    customerNumber: row.customer_number,
+    accountNumber: row.account_number,
+    eventType: row.event_type,
+    title: row.title,
+    message: row.message,
+    severity: row.severity,
+    status: row.status,
+    payload: row.payload || {},
+    createdAt: row.created_at,
+    deliveredAt: row.delivered_at
+  }));
+};
+
+const upsertOutageStatusHandler = async ({ outage_event_id, premise_number, status, cause, estimated_restoration_at, actual_restoration_at, affected_customers }: any) => {
+  const outageEventId = outage_event_id || makeId("OUTAGE");
+  const result = await pool.query(
+    `INSERT INTO outage_events
+      (outage_event_id, premise_number, status, cause, estimated_restoration_at, actual_restoration_at, affected_customers, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
+     ON CONFLICT (outage_event_id)
+     DO UPDATE SET status = EXCLUDED.status,
+                   cause = EXCLUDED.cause,
+                   estimated_restoration_at = EXCLUDED.estimated_restoration_at,
+                   actual_restoration_at = EXCLUDED.actual_restoration_at,
+                   affected_customers = EXCLUDED.affected_customers,
+                   updated_at = CURRENT_TIMESTAMP
+     RETURNING *`,
+    [outageEventId, premise_number, status, cause || null, estimated_restoration_at || null, actual_restoration_at || null, affected_customers || null]
+  );
+  const outage = result.rows[0];
+
+  const accountResult = await pool.query(
+    `SELECT account_number, customer_number, service_address_line1, service_address_city, service_address_state, service_address_zip
+     FROM accounts
+     WHERE premise_number = $1`,
+    [premise_number]
+  );
+
+  const notifications = [];
+  for (const account of accountResult.rows) {
+    const serviceAddress = `${account.service_address_line1}, ${account.service_address_city}, ${account.service_address_state} ${account.service_address_zip}`;
+    const estimateText = outage.estimated_restoration_at ? ` Estimated restoration: ${outage.estimated_restoration_at}.` : "";
+    const restoredText = outage.actual_restoration_at ? ` Restored at: ${outage.actual_restoration_at}.` : "";
+    const notification = await createProactiveNotification({
+      customerNumber: account.customer_number,
+      accountNumber: account.account_number,
+      eventType: "outage_restoration",
+      title: status.toLowerCase() === "restored" ? "Power restored" : "Outage status update",
+      message: `Outage update for ${serviceAddress}: ${status}.${estimateText}${restoredText}`,
+      severity: status.toLowerCase() === "restored" ? "info" : "warning",
+      payload: outage,
+      dedupeKey: `outage:${outageEventId}:${account.account_number}:${status}:${estimated_restoration_at || ''}:${actual_restoration_at || ''}`
+    });
+    if (notification) notifications.push(notification);
+  }
+
+  await addAudit("upsert_outage_status", { premise_number, outageEventId, status });
+  return {
+    status: "UPSERTED",
+    outageEventId,
+    notificationsCreated: notifications.length,
+    outage
+  };
+};
+
+const runScheduledNotificationChecksHandler = async ({ customer_number, account_number }: any = {}) => {
+  const subscriptionResult = await pool.query(
+    `SELECT *
+     FROM proactive_notification_subscriptions
+     WHERE enabled = TRUE
+       AND ($1::text = '' OR customer_number = $1)
+       AND ($2::text = '' OR account_number = $2)
+       AND (last_checked_at IS NULL OR last_checked_at <= CURRENT_TIMESTAMP - (frequency_minutes || ' minutes')::interval)
+     ORDER BY created_at ASC`,
+    [customer_number || '', account_number || '']
+  );
+
+  const notifications = [];
+  for (const subscription of subscriptionResult.rows) {
+    if (subscription.monitor_type === "outage_restoration") {
+      const outageResult = await pool.query(
+        `SELECT o.*, a.account_number, a.customer_number, a.service_address_line1, a.service_address_city, a.service_address_state, a.service_address_zip
+         FROM outage_events o
+         INNER JOIN accounts a ON a.premise_number = o.premise_number
+         WHERE a.customer_number = $1
+           AND ($2::text IS NULL OR a.account_number = $2)
+         ORDER BY o.updated_at DESC
+         LIMIT 5`,
+        [subscription.customer_number, subscription.account_number]
+      );
+
+      for (const outage of outageResult.rows) {
+        const serviceAddress = `${outage.service_address_line1}, ${outage.service_address_city}, ${outage.service_address_state} ${outage.service_address_zip}`;
+        const notification = await createProactiveNotification({
+          subscriptionId: subscription.id,
+          customerNumber: outage.customer_number,
+          accountNumber: outage.account_number,
+          eventType: "outage_restoration",
+          title: outage.status.toLowerCase() === "restored" ? "Power restored" : "Outage restoration estimate",
+          message: `Outage status for ${serviceAddress}: ${outage.status}. Estimated restoration: ${outage.estimated_restoration_at || "not yet available"}.`,
+          severity: outage.status.toLowerCase() === "restored" ? "info" : "warning",
+          payload: outage,
+          dedupeKey: `scheduled:outage:${subscription.id}:${outage.outage_event_id}:${outage.status}:${outage.estimated_restoration_at || ''}:${outage.actual_restoration_at || ''}`
+        });
+        if (notification) notifications.push(notification);
+      }
+    }
+
+    if (subscription.monitor_type === "service_request_status") {
+      const orderResult = await pool.query(
+        `SELECT service_order_id, account_number, order_type, effective_date, status, updated_at, created_at
+         FROM service_orders
+         WHERE ($1::text IS NULL OR account_number = $1)
+         UNION ALL
+         SELECT service_order_id, account_number, 'move_in' AS order_type, scheduled_connect_date AS effective_date, status, updated_at, created_at
+         FROM service_connection_orders
+         WHERE ($1::text IS NULL OR account_number = $1)
+         ORDER BY created_at DESC
+         LIMIT 10`,
+        [subscription.account_number]
+      );
+
+      for (const order of orderResult.rows) {
+        const notification = await createProactiveNotification({
+          subscriptionId: subscription.id,
+          customerNumber: subscription.customer_number,
+          accountNumber: order.account_number,
+          eventType: "service_request_status",
+          title: "Service request status update",
+          message: `Service request ${order.service_order_id} is ${order.status}. Scheduled/effective date: ${order.effective_date || "not set"}.`,
+          severity: order.status === "CANCELLED" ? "warning" : "info",
+          payload: order,
+          dedupeKey: `scheduled:service:${subscription.id}:${order.service_order_id}:${order.status}:${order.effective_date || ''}`
+        });
+        if (notification) notifications.push(notification);
+      }
+    }
+
+    if (subscription.monitor_type === "bill_projection_threshold" && subscription.account_number) {
+      const projection = await projectedNextBillHandler({ account_number: subscription.account_number });
+      const threshold = Number(subscription.threshold_usd || 0);
+      if (projection.found !== false && threshold > 0 && Number(projection.projectedNextBillUsd) >= threshold) {
+        const notification = await createProactiveNotification({
+          subscriptionId: subscription.id,
+          customerNumber: subscription.customer_number,
+          accountNumber: subscription.account_number,
+          eventType: "bill_projection_threshold",
+          title: "Projected bill threshold reached",
+          message: `Your projected next bill is $${projection.projectedNextBillUsd}, which meets or exceeds your $${threshold.toFixed(2)} alert threshold.`,
+          severity: "warning",
+          payload: projection,
+          dedupeKey: `scheduled:bill:${subscription.id}:${projection.projectedNextBillUsd}:${threshold}`
+        });
+        if (notification) notifications.push(notification);
+      }
+    }
+
+    await pool.query(
+      `UPDATE proactive_notification_subscriptions
+       SET last_checked_at = CURRENT_TIMESTAMP,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1`,
+      [subscription.id]
+    );
+  }
+
+  await addAudit("run_scheduled_notification_checks", { customer_number: customer_number || null, account_number: account_number || null, notificationsCreated: notifications.length });
+  return {
+    status: "CHECKED",
+    subscriptionsChecked: subscriptionResult.rows.length,
+    notificationsCreated: notifications.length,
+    notifications
+  };
+};
+
 const createSupportCaseHandler = async ({ account_number, category, subject, description, priority }: any) => {
   const caseId = makeId("CASE");
   await pool.query(
@@ -1879,7 +2169,7 @@ server.registerTool(
 server.registerTool(
   "get_premise_details",
   {
-    description: "Return FPL premise details by premise number or service address. Includes property type, service_status, serviceActive (boolean), garage readiness (240V circuit, WiFi), EV suitability, and concrete nextAction/instructions/customerOfferTemplate fields. When serviceActive is false, the customerOfferTemplate is a template with [address] and [date] placeholders. You MUST fill in the placeholders using the address and closing/move-in/renting date from the public records tool and say the resulting sentence to the customer to offer schedule_move_in_service. The template starts with 'Congratulations on your new home!' for a home purchase. If no date is available, ask the customer for their preferred date. Ask for confirmation before calling schedule_move_in_service. Does NOT include public-record data (closing date, sale price, parcel ID, etc.) — get those from a public records tool. Use after resolving the address through a public records tool (e.g., for a home purchase) or direct customer input. For EV questions, call this and check_ev_eligibility together in sequence.",
+    description: "Return FPL service-location details by premise number or service address. Includes property type, service_status, serviceActive (boolean), garage readiness (240V circuit, WiFi), EV suitability, active-service guidance, and concrete nextAction/instructions/customerOfferTemplate fields. When serviceActive is false, the customerOfferTemplate is a template with [address], [date], and when applicable [existing_service_address] placeholders. You MUST fill placeholders using the address and closing/move-in/renting date from the public records tool and activeServiceAddresses from get_my_account_overview. If another active service address exists, ask whether the customer wants to keep that service active before calling schedule_move_in_service. If no date is available, ask the customer for their preferred date. Ask for confirmation before calling schedule_move_in_service. Does NOT include public-record data (closing date, sale price, parcel ID, etc.) — get those from a public records tool. Use after resolving the address through a public records tool (e.g., for a home purchase) or direct customer input. For EV questions, call this and check_ev_eligibility together in sequence. Do not say 'premise' or show internal premise numbers to the customer.",
     inputSchema: {
       premise_number: z.string().optional(),
       address: z.string().optional()
@@ -1891,7 +2181,7 @@ server.registerTool(
       return {
         content: [{
           type: "text" as const,
-          text: `Premise not found for ${address || premise_number}. Do NOT call get_premise_details again. Instead, call start_service_connection with the address to create a new service connection, or schedule_move_in_service if the customer has a closing/move-in date.`
+          text: `Service address not found for ${address || premise_number}. Do NOT call get_premise_details again. Instead, call start_service_connection with the address to create a new service connection, or schedule_move_in_service if the customer has a closing/move-in date. Do not say "premise" to the customer.`
         }]
       };
     }
@@ -1901,20 +2191,20 @@ server.registerTool(
     const hasWifi = premise.strong_wifi_at_charging_location;
     const evEligible = premise.evolution_home_eligible;
     const summary = [
-      `Premise ${premise.premise_number} | ${premise.address_line1}, ${premise.address_city}, ${premise.address_state} ${premise.address_zip}`,
+      `Service address: ${premise.address_line1}, ${premise.address_city}, ${premise.address_state} ${premise.address_zip}`,
       `Service status: ${status}`,
       `Property type: ${premise.property_type || "unknown"}`,
       `EV eligibility: ${evEligible ? "ELIGIBLE" : "not eligible"}`,
       `240V garage circuit: ${has240v ? "YES — equipment-only install possible" : "NO — full installation required (~$36/mo)"}`,
       `WiFi at charging location: ${hasWifi ? "yes" : "no"}`,
       isInactive
-        ? `ACTION: Service is inactive. Use schedule_move_in_service with premise_number="${premise.premise_number}" and requested_connect_date="[closing/move-in date from public-property records]" to schedule power. Do NOT schedule_ev_assessment or enroll_ev_charging yet. After service is active, call schedule_ev_assessment or enroll_ev_charging.`
-        : `Service is active. You can call schedule_ev_assessment or enroll_ev_charging with premise_number="${premise.premise_number}" now.`
+        ? `ACTION: Service is inactive. Before calling schedule_move_in_service, ask whether the customer wants to keep any existing active FPL service from activeServiceAddresses. Use premise_number="${premise.premise_number}" only as an internal tool argument with requested_connect_date="[closing/move-in date from public-property records]". Do NOT schedule_ev_assessment or enroll_ev_charging yet. After service is active, call schedule_ev_assessment or enroll_ev_charging.`
+        : `Service is active. You can call schedule_ev_assessment or enroll_ev_charging with premise_number="${premise.premise_number}" as an internal argument now.`
     ].join("\n");
     return {
       content: [{
         type: "text" as const,
-        text: `${summary}\n\nFull premise data:\n${JSON.stringify(premise, null, 2)}`
+        text: `${summary}\n\nInternal service-location data. Do not quote internal IDs or use the word "premise" in customer-facing responses:\n${JSON.stringify(premise, null, 2)}`
       }]
     };
   }
@@ -1968,7 +2258,7 @@ server.registerTool(
 server.registerTool(
   "check_ev_eligibility",
   {
-    description: "Return premise-specific FPL EVolution Home eligibility checks and recommended install type. The response includes recommended_install_type, alternate_install_type, serviceActive (true/false), nextAction, instructions, and customerOfferTemplate. When serviceActive is false, the customerOfferTemplate is a template with [address] and [date] placeholders. You MUST fill in the placeholders using the address and closing/move-in/renting date from the public records tool and say the resulting sentence to the customer to offer schedule_move_in_service. The template starts with 'Congratulations on your new home!' for a home purchase. If no date is available, ask the customer for their preferred date. Ask for confirmation before calling the tool. Do NOT schedule_ev_assessment or enroll_ev_charging while service is inactive. Display both EV plans to the customer. Requires premise_number. Call immediately after get_premise_details for the same premise.",
+    description: "Return address-specific FPL EVolution Home eligibility checks and recommended install type. The response includes recommended_install_type, alternate_install_type, serviceActive (true/false), nextAction, instructions, and customerOfferTemplate. When serviceActive is false, the customerOfferTemplate is a template with [address], [date], and when applicable [existing_service_address] placeholders. You MUST fill placeholders using the address and closing/move-in/renting date from the public records tool and the activeServiceAddresses from get_my_account_overview. If another active service address exists, ask whether the customer wants to keep that existing service active before calling schedule_move_in_service. If no date is available, ask the customer for their preferred date. Do NOT schedule_ev_assessment or enroll_ev_charging while service is inactive. Display both EV plans to the customer. Requires premise_number as an internal argument only. Call immediately after get_premise_details for the same address. Do not say 'premise' or show internal premise numbers to the customer.",
     inputSchema: {
       premise_number: z.string()
     }
@@ -1994,7 +2284,7 @@ server.registerTool(
 server.registerTool(
   "get_service_connection_quote",
   {
-    description: "Optional preview of move-in connection fees, deposit, and earliest date for a premise. Skip this if the user already confirmed they want service connected; call start_service_connection directly instead. Use only when the user explicitly asks for a quote or timing before committing.",
+    description: "Optional preview of move-in connection fees, deposit, and earliest date for a service address. Skip this if the user already confirmed they want service connected; call start_service_connection directly instead. Use only when the user explicitly asks for a quote or timing before committing. Do not say 'premise' or show internal premise numbers to the customer.",
     inputSchema: {
       premise_number: z.string()
     }
@@ -2005,7 +2295,7 @@ server.registerTool(
 server.registerTool(
   "start_service_connection",
   {
-    description: "Submit or schedule a new residential power connection (move-in / start service) for a resolved premise. Provide requested_connect_date to schedule the move-in date, e.g., the customer's closing or move-in date. This is the tool to offer when a customer is purchasing a home and needs power turned on. IDEMPOTENT: if a SUBMITTED order already exists, the existing order is returned. Call directly when get_premise_details/check_ev_eligibility shows inactive service and the customer has agreed to a date; do not ask for a separate quote first.",
+    description: "Submit or schedule a new residential power connection (move-in / start service) for a resolved service address. Provide requested_connect_date to schedule the move-in date, e.g., the customer's closing or move-in date. This is the tool to offer when a customer is purchasing a home and needs power turned on. IDEMPOTENT: if a SUBMITTED order already exists, the existing order is returned. Only call after get_premise_details/check_ev_eligibility shows inactive service, the customer confirms the new service address and date, and the customer answers whether to keep any existing active FPL service shown in activeServiceAddresses from get_my_account_overview. Do not ask for a separate quote first. Do not say 'premise' or show internal premise numbers to the customer.",
     inputSchema: {
       premise_number: z.string(),
       account_number: z.string().optional(),
@@ -2019,7 +2309,7 @@ server.registerTool(
 server.registerTool(
   "schedule_move_in_service",
   {
-    description: "Schedule a move-in electric service start date for a resolved premise. Requires premise_number and requested_connect_date (the closing or move-in date). This is the primary tool to use when a customer is purchasing a home and needs power turned on by a specific date. It is idempotent and will return an existing SUBMITTED order if one already exists. Use the closing date from any available public-property records tool as the requested_connect_date, or the customer's move-in date. Only call after the customer confirms the address/premise and provides a move-in or closing date. After scheduling, the response includes a moveIntentQuestion. If the customer has an active FPL service at another premise, ask that question and call set_move_intent to record the customer's choice (keep_both or move_out_existing). Do NOT stop existing service without explicit confirmation.",
+    description: "Schedule a move-in electric service start date for a resolved service address. Requires premise_number as an internal argument and requested_connect_date (the closing or move-in date). This is the primary tool to use when a customer is purchasing a home and needs power turned on by a specific date. It is idempotent and will return an existing SUBMITTED order if one already exists. Use the closing date from any available public-property records tool as the requested_connect_date, or the customer's move-in date. Only call after the customer confirms the new service address, start date, and answers whether to keep any existing active FPL service shown in activeServiceAddresses from get_my_account_overview. If they answer about existing service, call set_move_intent to record keep_both or move_out_existing. Do NOT stop existing service without explicit confirmation. Do not say 'premise' or show internal premise numbers to the customer.",
     inputSchema: {
       premise_number: z.string(),
       account_number: z.string().optional(),
@@ -2033,7 +2323,7 @@ server.registerTool(
 server.registerTool(
   "enroll_ev_charging",
   {
-    description: "Submit FPL EVolution Home EV charging enrollment for a premise. This tool will reject the enrollment if the premise is not eligible or if power service is not active yet; the response then includes the exact next step (usually schedule_move_in_service). Call right after schedule_move_in_service when the user has agreed to EV home charging, but note that power will not be active until the scheduled connect date. Use the install_type from check_ev_eligibility ('full' for no 240V circuit, 'equipment_only' for existing 240V circuit). Do not ask for a separate confirmation unless the install type is ambiguous.",
+    description: "Submit FPL EVolution Home EV charging enrollment for a service address. This tool will reject the enrollment if the address is not eligible or if power service is not active yet; the response then includes the exact next step (usually schedule_move_in_service). Only call after power service is active. Use the install_type from check_ev_eligibility ('full' for no 240V circuit, 'equipment_only' for existing 240V circuit). Do not ask for a separate confirmation unless the install type is ambiguous. Do not say 'premise' or show internal premise numbers to the customer.",
     inputSchema: {
       premise_number: z.string(),
       account_number: z.string().optional(),
@@ -2047,7 +2337,7 @@ server.registerTool(
 server.registerTool(
   "set_move_intent",
   {
-    description: "Record the customer's intent about their existing FPL service when starting service at a new premise. This tool does NOT create or cancel any service orders; it only records intent. Use after schedule_move_in_service when the customer has another active FPL premise. Choices: keep_both (keep existing service active AND start new service), move_out_existing (intend to stop service at an existing premise after the existing premise and stop date are explicitly confirmed), move_out_miami (legacy Miami demo flow). Only call after the customer explicitly confirms their intent. Never stop existing service based only on a public-property event, inferred move, city mention, or EV inquiry.",
+    description: "Record the customer's intent about their existing FPL service when starting service at a new address. This tool does NOT create or cancel any service orders; it only records intent. Use when the customer has another active FPL service address and explicitly answers whether to keep that service active or move out. Choices: keep_both (keep existing service active AND start new service), move_out_existing (intend to stop service at an existing address after the existing address and stop date are explicitly confirmed), move_out_miami (legacy Miami demo flow). Only call after the customer explicitly confirms their intent. Never stop existing service based only on a public-property event, inferred move, city mention, or EV inquiry. Do not say 'premise' or show internal premise numbers to the customer.",
     inputSchema: {
       customer_number: z.string().optional(),
       intent: z.enum(["keep_both", "move_out_existing", "move_out_miami"])
@@ -2275,7 +2565,7 @@ server.registerTool(
 server.registerTool(
   "schedule_ev_assessment",
   {
-    description: "Schedule an on-site EV electrical assessment for a premise. Requires active power service at the premise. If service is not active, the tool returns PENDING_SERVICE_ACTIVATION and instructs you to schedule electric service first with schedule_move_in_service. Required before full installation can begin. Customer will receive a link to upload garage photos.",
+    description: "Schedule an on-site EV electrical assessment for a service address. Requires active power service at that address. If service is not active, the tool returns PENDING_SERVICE_ACTIVATION and instructs you to schedule electric service first with schedule_move_in_service. Required before full installation can begin. Customer will receive a link to upload garage photos. Do not say 'premise' or show internal premise numbers to the customer.",
     inputSchema: {
       premise_number: z.string(),
       preferred_date: z.string().optional()
@@ -2418,6 +2708,65 @@ server.registerTool(
     }
   },
   async (input) => jsonContent(await projectedNextBillHandler(input))
+);
+
+server.registerTool(
+  "subscribe_proactive_notifications",
+  {
+    description: "Customer-authorized proactive monitoring setup. Use when the customer asks ChatGPT to check on a schedule for outage restoration estimates, service request status, or projected bill threshold alerts. monitor_type must be outage_restoration, service_request_status, or bill_projection_threshold. For bill_projection_threshold, provide threshold_usd. A ChatGPT scheduled task or background job should call run_scheduled_notification_checks periodically.",
+    inputSchema: {
+      customer_number: z.string(),
+      account_number: z.string().optional(),
+      monitor_type: z.enum(["outage_restoration", "service_request_status", "bill_projection_threshold"]),
+      channel: z.enum(["sms", "email", "both"]).optional(),
+      frequency_minutes: z.number().int().min(1).optional(),
+      threshold_usd: z.number().optional()
+    }
+  },
+  async (input) => jsonContent(await subscribeProactiveNotificationsHandler(input))
+);
+
+server.registerTool(
+  "run_scheduled_notification_checks",
+  {
+    description: "Scheduled ChatGPT/background-job entrypoint for proactive notification checks. Safe to call every hour. Checks customer-authorized monitors for outage restoration estimates, service request status, and bill projection thresholds, then creates pending notifications without taking sensitive follow-up actions.",
+    inputSchema: {
+      customer_number: z.string().optional(),
+      account_number: z.string().optional()
+    }
+  },
+  async (input) => jsonContent(await runScheduledNotificationChecksHandler(input))
+);
+
+server.registerTool(
+  "upsert_outage_status",
+  {
+    description: "Event-driven FPL outage update hook. Creates or updates outage status/restoration estimates for a service location and creates proactive customer notifications for affected accounts. Use for outage status, estimated restoration time, and restored events.",
+    inputSchema: {
+      outage_event_id: z.string().optional(),
+      premise_number: z.string(),
+      status: z.string(),
+      cause: z.string().optional(),
+      estimated_restoration_at: z.string().optional(),
+      actual_restoration_at: z.string().optional(),
+      affected_customers: z.number().int().optional()
+    }
+  },
+  async (input) => jsonContent(await upsertOutageStatusHandler(input))
+);
+
+server.registerTool(
+  "get_proactive_notifications",
+  {
+    description: "List proactive notifications created by scheduled checks or outage events. Use at the start of a ChatGPT session or inside a scheduled task to summarize pending outage, service request, or bill threshold updates.",
+    inputSchema: {
+      customer_number: z.string().optional(),
+      account_number: z.string().optional(),
+      status: z.enum(["PENDING", "DELIVERED"]).optional(),
+      limit: z.number().int().min(1).max(100).optional()
+    }
+  },
+  async (input) => jsonContent(await getProactiveNotificationsHandler(input))
 );
 
 server.registerTool(
@@ -2635,6 +2984,9 @@ const ACCOUNT_SCOPED_TOOLS = new Set([
   "get_peak_alerts",
   "recommend_ev_charging_window",
   "projected_next_bill",
+  "subscribe_proactive_notifications",
+  "run_scheduled_notification_checks",
+  "get_proactive_notifications",
   "create_support_case"
 ]);
 
@@ -2644,6 +2996,9 @@ const CUSTOMER_SCOPED_TOOLS = new Set([
   "set_move_intent",
   "update_contact_info",
   "update_notification_preferences",
+  "subscribe_proactive_notifications",
+  "run_scheduled_notification_checks",
+  "get_proactive_notifications",
   "set_preferred_language",
   "verify_identity_stepup"
 ]);
@@ -2947,22 +3302,22 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
       // Create a mock stdio transport to get the tools list
       // We'll use the server's internal method to get tools
       const tools = [
-        { name: "get_my_account_overview", description: "USE THIS FIRST for any billing, account status, profile, EV service, move-in, new-home, city or area change, or balance question from an authenticated user. No parameters needed — resolves everything from login. Returns all linked accounts with billing, account status, service address, EV enrollment, customer full name, email, and phone, plus proactiveNextSteps. The response includes explicit proactiveNextSteps: when the user mentions a new city, area, move, new home, or EV service at a different location, you MUST search available public-property records tools for the customer's properties in that city/area. Then call get_premise_details and check_ev_eligibility in sequence. Do not answer generically based only on the current account data. For EV or new-home questions, after this call resolve the street address. If a public-property records tool is available, use it first to find the property and closing date; otherwise ask the customer. Then call get_premise_details and check_ev_eligibility in sequence. Display both EV plans from the check_ev_eligibility response. If the customer is purchasing or moving into the home and service is not active, proactively offer to schedule move-in electric service with schedule_move_in_service using the closing date from the public records tool or the customer's move-in date as requested_connect_date. Do not schedule_ev_assessment or enroll_ev_charging before service is active.", inputSchema: { type: "object", properties: {}, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+        { name: "get_my_account_overview", description: "USE THIS FIRST for any billing, account status, profile, EV service, move-in, new-home, city or area change, or balance question from an authenticated user. No parameters needed — resolves everything from login. Returns all linked accounts with billing, account status, service address, EV enrollment, customer full name, email, phone, activeServiceAddresses, and proactiveNextSteps. The response includes explicit proactiveNextSteps: when the user mentions a new city, area, move, new home, or EV service at a different location, you MUST search available public-property records tools for the customer's properties in that city/area. Then call get_premise_details and check_ev_eligibility in sequence. Do not answer generically based only on the current account data. For EV or new-home questions, after this call resolve the street address. If a public-property records tool is available, use it first to find the property and closing date; otherwise ask the customer. Then call get_premise_details and check_ev_eligibility in sequence. Display both EV plans from the check_ev_eligibility response. If the customer is purchasing or moving into the home and service is not active, proactively offer to schedule move-in electric service using the closing date from the public records tool or the customer's move-in date as requested_connect_date. If activeServiceAddresses has another active service address, ask whether the customer wants to keep that existing FPL service active before calling schedule_move_in_service. Do not schedule_ev_assessment or enroll_ev_charging before service is active. Do not say 'premise' or show internal premise numbers to the customer.", inputSchema: { type: "object", properties: {}, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "get_customer_profile", description: "Look up a customer by customer_number, phone, or email. Returns name, contact info, linked accounts, premises, and registered EVs. Use for agent/lookup flows or when the authenticated user is not the customer being queried. Do NOT use this to get billing — use get_my_account_overview instead.", inputSchema: { type: "object", properties: { customer_number: { type: "string" }, phone: { type: "string" }, email: { type: "string" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "lookup_account", description: "Resolve a residential account by account_number, customer_number, phone, email, premise_number, or address. Use when you need to find an account that is not linked to the current authenticated user. Do NOT call this for the logged-in user's own account — use get_my_account_overview instead.", inputSchema: { type: "object", properties: { account_number: { type: "string" }, customer_number: { type: "string" }, phone: { type: "string" }, email: { type: "string" }, premise_number: { type: "string" }, address: { type: "string" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "get_account_summary", description: "Return account status, standing (Good/Past Due), rate class (e.g. RS-1, TOU-EV), smart meter flag, enrolled programs, and account flags for a specific account. Use when you need deeper account-level detail beyond what get_my_account_overview provides. account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
-        { name: "get_premise_details", description: "Return FPL premise details for a service address or premise number. Includes property type, service_status, serviceActive (boolean), garage readiness (240V circuit, WiFi), EV suitability, and concrete nextAction/instructions/customerOfferTemplate fields. When serviceActive is false, the customerOfferTemplate is a template with [address] and [date] placeholders. You MUST fill in the placeholders using the address and closing/move-in/renting date from the public records tool and say the resulting sentence to the customer to offer schedule_move_in_service. The template starts with 'Congratulations on your new home!' for a home purchase. If no date is available, ask the customer for their preferred date. Ask for confirmation before calling schedule_move_in_service. Does NOT include public-record data (closing date, sale price, parcel ID, etc.) — get those from a public records tool. Use after resolving the address through a public records tool (e.g., for a home purchase) or direct customer input. For EV questions, call this and check_ev_eligibility together in sequence.", inputSchema: { type: "object", properties: { premise_number: { type: "string" }, address: { type: "string" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+        { name: "get_premise_details", description: "Return FPL service-location details for a service address or premise number. Includes property type, service_status, serviceActive (boolean), garage readiness (240V circuit, WiFi), EV suitability, active-service guidance, and concrete nextAction/instructions/customerOfferTemplate fields. When serviceActive is false, the customerOfferTemplate is a template with [address], [date], and when applicable [existing_service_address] placeholders. You MUST fill placeholders using the address and closing/move-in/renting date from the public records tool and activeServiceAddresses from get_my_account_overview. If another active service address exists, ask whether the customer wants to keep that service active before calling schedule_move_in_service. If no date is available, ask the customer for their preferred date. Ask for confirmation before calling schedule_move_in_service. Does NOT include public-record data (closing date, sale price, parcel ID, etc.) — get those from a public records tool. Use after resolving the address through a public records tool (e.g., for a home purchase) or direct customer input. For EV questions, call this and check_ev_eligibility together in sequence. Do not say 'premise' or show internal premise numbers to the customer.", inputSchema: { type: "object", properties: { premise_number: { type: "string" }, address: { type: "string" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "get_billing_inquiry", description: "Return detailed billing for a specific account: current bill amount, due date, billing period, kWh used, average daily cost, full charge-line breakdown (base, fuel, non-fuel, EVolution, taxes), and EV off-peak savings. Use when you need billing for a non-primary account or deeper detail than get_my_account_overview provides. account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "get_payment_history", description: "Return recent payments (date, amount, method) and AutoPay status including next scheduled payment date and amount. Use for questions like 'did my payment go through', 'when is my next autopay', or 'show my payment history'. account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "get_usage_history", description: "Return month-by-month kWh usage, cost, and EV charging kWh going back up to 12 months. Use for questions about usage trends, seasonal comparisons, or 'why is my bill higher this month'. account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "get_ev_enrollment", description: "Return FPL EVolution Home EV charging enrollment details: charger ID, model, status (Active/Paused/Cancelled), install type (full/equipment_only), monthly charge, install date, and registered vehicles linked to this account. Use for questions about 'which car', 'my EV charger', 'EVolution Home plan', or EV charging setup.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
-        { name: "check_ev_eligibility", description: "Check whether a specific premise is eligible for FPL EVolution Home EV charging enrollment. Returns eligibility status, recommended_install_type, alternate_install_type, serviceActive, nextAction, instructions, and customerOfferTemplate. When serviceActive is false, the customerOfferTemplate is a template with [address] and [date] placeholders. You MUST fill in the placeholders using the address and closing/move-in/renting date from the public records tool and say the resulting sentence to the customer to offer schedule_move_in_service. The template starts with 'Congratulations on your new home!' for a home purchase. If no date is available, ask the customer for their preferred date. Ask for confirmation before calling the tool. Do NOT schedule_ev_assessment or enroll_ev_charging while service is inactive. Display both EV plans to the customer. Requires premise_number. Call immediately after get_premise_details for the same premise.", inputSchema: { type: "object", properties: { premise_number: { type: "string" } }, required: ["premise_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+        { name: "check_ev_eligibility", description: "Check whether a specific service address is eligible for FPL EVolution Home EV charging enrollment. Returns eligibility status, recommended_install_type, alternate_install_type, serviceActive, nextAction, instructions, and customerOfferTemplate. When serviceActive is false, the customerOfferTemplate is a template with [address], [date], and when applicable [existing_service_address] placeholders. You MUST fill placeholders using the address and closing/move-in/renting date from the public records tool and activeServiceAddresses from get_my_account_overview. If another active service address exists, ask whether the customer wants to keep that existing service active before calling schedule_move_in_service. If no date is available, ask the customer for their preferred date. Do NOT schedule_ev_assessment or enroll_ev_charging while service is inactive. Display both EV plans to the customer. Requires premise_number as an internal argument only. Call immediately after get_premise_details for the same address. Do not say 'premise' or show internal premise numbers to the customer.", inputSchema: { type: "object", properties: { premise_number: { type: "string" } }, required: ["premise_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "match_property_to_customer", description: "Link a known new-property street address to the existing FPL customer and premise. Pass owner_name from any available public-property records tool when available; if the premise has no active account, the tool uses owner_name to find the matching FPL customer. Does NOT return public-record details — get those from a public records tool. Use after a public records tool finds a recent property event, or when the customer directly provides the new address. If no public records tool is available, ask the customer for the street address and their full name.", inputSchema: { type: "object", properties: { address: { type: "string" }, owner_name: { type: "string" } }, required: ["address"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
-        { name: "get_service_connection_quote", description: "Optional preview of move-in power connection fees, deposit, and earliest date for a premise. SKIP this if the user has already said 'start service', 'connect power', or otherwise confirmed they want service connected; call start_service_connection directly instead. Use only when the user explicitly asks for a quote or timing before committing.", inputSchema: { type: "object", properties: { premise_number: { type: "string" } }, required: ["premise_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
-        { name: "start_service_connection", description: "Submit a new residential power connection (move-in / start service) for a resolved premise. Provide requested_connect_date to schedule a move-in date. IDEMPOTENT: if a SUBMITTED order already exists, the existing order is returned. Call this when the customer has confirmed they want service connected and provided a date. The response tells you the next step (enroll_ev_charging after activation).", inputSchema: { type: "object", properties: { premise_number: { type: "string" }, account_number: { type: "string" }, requested_connect_date: { type: "string" } }, required: ["premise_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
-        { name: "schedule_move_in_service", description: "Schedule a move-in electric service start date for a resolved premise. Requires premise_number and requested_connect_date (the closing or move-in date). This is the PRIMARY tool to use when a customer is purchasing a home and needs power turned on by a specific date. It is idempotent and returns an existing SUBMITTED order if one already exists. Use the closing date from any available public-property records tool as the requested_connect_date, or the customer's move-in date. Only call after the customer confirms the address and the date. After scheduling, the response includes a moveIntentQuestion. If the customer has an active FPL service at another premise, ask that question and call set_move_intent to record the customer's choice (keep_both or move_out_existing). Do NOT stop existing service without explicit confirmation.", inputSchema: { type: "object", properties: { premise_number: { type: "string" }, account_number: { type: "string" }, requested_connect_date: { type: "string" } }, required: ["premise_number", "requested_connect_date"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
-        { name: "enroll_ev_charging", description: "Submit an FPL EVolution Home EV charging enrollment for a premise. This tool will reject the enrollment if the premise is not eligible or if power service is not active yet; the response then includes the exact next step (usually schedule_move_in_service). Call right after schedule_move_in_service when the user has agreed to EV home charging, but note that power will not be active until the scheduled connect date. Use the install_type from check_ev_eligibility. account_number auto-resolved from login if omitted. Do not ask for a separate confirmation unless the install type is ambiguous.", inputSchema: { type: "object", properties: { premise_number: { type: "string" }, account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." }, install_type: { type: "string", enum: ["full", "equipment_only"] } }, required: ["premise_number", "install_type"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
-        { name: "set_move_intent", description: "Record the customer's intent about their existing FPL service when starting service at a new premise. This tool does NOT create or cancel any service orders; it only records intent. Use after schedule_move_in_service when the customer has another active FPL premise. Choices: keep_both (keep existing service active AND start new service), move_out_existing (intend to stop service at an existing premise after the existing premise and stop date are explicitly confirmed), move_out_miami (legacy Miami demo flow). Only call after explicit customer confirmation — never stop service based only on a public-property event, inferred move, city mention, or EV inquiry. customer_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { customer_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." }, intent: { type: "string", enum: ["keep_both", "move_out_existing", "move_out_miami"] } }, required: ["intent"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+        { name: "get_service_connection_quote", description: "Optional preview of move-in power connection fees, deposit, and earliest date for a service address. SKIP this if the user has already said 'start service', 'connect power', or otherwise confirmed they want service connected; call start_service_connection directly instead. Use only when the user explicitly asks for a quote or timing before committing. Do not say 'premise' or show internal premise numbers to the customer.", inputSchema: { type: "object", properties: { premise_number: { type: "string" } }, required: ["premise_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+        { name: "start_service_connection", description: "Submit a new residential power connection (move-in / start service) for a resolved service address. Provide requested_connect_date to schedule a move-in date. IDEMPOTENT: if a SUBMITTED order already exists, the existing order is returned. Only call after the customer confirms the new service address, date, and whether to keep any existing active FPL service shown in activeServiceAddresses from get_my_account_overview. The response tells you the next step (enroll_ev_charging after activation). Do not say 'premise' or show internal premise numbers to the customer.", inputSchema: { type: "object", properties: { premise_number: { type: "string" }, account_number: { type: "string" }, requested_connect_date: { type: "string" } }, required: ["premise_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+        { name: "schedule_move_in_service", description: "Schedule a move-in electric service start date for a resolved service address. Requires premise_number as an internal argument and requested_connect_date (the closing or move-in date). This is the PRIMARY tool to use when a customer is purchasing a home and needs power turned on by a specific date. It is idempotent and returns an existing SUBMITTED order if one already exists. Use the closing date from any available public-property records tool as the requested_connect_date, or the customer's move-in date. Only call after the customer confirms the new service address, start date, and answers whether to keep any existing active FPL service shown in activeServiceAddresses from get_my_account_overview. If they answer about existing service, call set_move_intent to record keep_both or move_out_existing. Do NOT stop existing service without explicit confirmation. Do not say 'premise' or show internal premise numbers to the customer.", inputSchema: { type: "object", properties: { premise_number: { type: "string" }, account_number: { type: "string" }, requested_connect_date: { type: "string" } }, required: ["premise_number", "requested_connect_date"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+        { name: "enroll_ev_charging", description: "Submit an FPL EVolution Home EV charging enrollment for a service address. This tool will reject the enrollment if the address is not eligible or if power service is not active yet; the response then includes the exact next step (usually schedule_move_in_service). Only call after power service is active. Use the install_type from check_ev_eligibility. account_number auto-resolved from login if omitted. Do not ask for a separate confirmation unless the install type is ambiguous. Do not say 'premise' or show internal premise numbers to the customer.", inputSchema: { type: "object", properties: { premise_number: { type: "string" }, account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." }, install_type: { type: "string", enum: ["full", "equipment_only"] } }, required: ["premise_number", "install_type"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+        { name: "set_move_intent", description: "Record the customer's intent about their existing FPL service when starting service at a new address. This tool does NOT create or cancel any service orders; it only records intent. Use when the customer has another active FPL service address and explicitly answers whether to keep that service active or move out. Choices: keep_both (keep existing service active AND start new service), move_out_existing (intend to stop service at an existing address after the existing address and stop date are explicitly confirmed), move_out_miami (legacy Miami demo flow). Only call after explicit customer confirmation — never stop service based only on a public-property event, inferred move, city mention, or EV inquiry. customer_number auto-resolved from login if omitted. Do not say 'premise' or show internal premise numbers to the customer.", inputSchema: { type: "object", properties: { customer_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." }, intent: { type: "string", enum: ["keep_both", "move_out_existing", "move_out_miami"] } }, required: ["intent"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "register_vehicle", description: "Register a new electric vehicle for a customer. Required: make, model, year, connector_type (e.g. J1772, CCS, CHAdeMO, Tesla). Links the EV to the customer's FPL account for EV charging tracking. customer_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { customer_number: { type: "string" }, linked_premise: { type: "string" }, make: { type: "string" }, model: { type: "string" }, year: { type: "number" }, connector_type: { type: "string" }, vehicle_id: { type: "string" } }, required: ["customer_number", "make", "model", "year", "connector_type"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "update_registered_vehicle", description: "Update an existing registered EV's details (make, model, year, connector_type, linked_premise). Use when the customer changes their vehicle or corrects registration info. Requires vehicle_id from get_ev_enrollment.", inputSchema: { type: "object", properties: { vehicle_id: { type: "string" }, linked_premise: { type: "string" }, make: { type: "string" }, model: { type: "string" }, year: { type: "number" }, connector_type: { type: "string" } }, required: ["vehicle_id"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "remove_registered_vehicle", description: "Remove a registered EV from the customer's account by vehicle_id. Use when the customer no longer owns the vehicle. Requires vehicle_id from get_ev_enrollment.", inputSchema: { type: "object", properties: { vehicle_id: { type: "string" } }, required: ["vehicle_id"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
@@ -2980,7 +3335,7 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
         { name: "update_ev_enrollment_plan", description: "Change the FPL EVolution Home plan type for an account: 'full' ($36/month, includes electrical install) or 'equipment_only' ($27/month, charger swap only). account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." }, install_type: { type: "string", enum: ["full", "equipment_only"] } }, required: ["install_type"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "pause_ev_enrollment", description: "Temporarily pause FPL EVolution Home enrollment for an account (e.g. while traveling or during renovation). Provide an optional reason. account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." }, reason: { type: "string" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "cancel_ev_enrollment", description: "Permanently cancel FPL EVolution Home enrollment for an account. Only call after explicit customer confirmation. Provide an optional reason. account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." }, reason: { type: "string" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
-        { name: "schedule_ev_assessment", description: "Schedule an on-site EV electrical assessment for a premise. Requires active power service at the premise. If service is not active, the tool returns PENDING_SERVICE_ACTIVATION and instructs you to schedule electric service first with schedule_move_in_service. Required before full installation can begin. Customer will receive a link to upload garage photos. preferred_date is optional (YYYY-MM-DD).", inputSchema: { type: "object", properties: { premise_number: { type: "string" }, preferred_date: { type: "string" } }, required: ["premise_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+        { name: "schedule_ev_assessment", description: "Schedule an on-site EV electrical assessment for a service address. Requires active power service at that address. If service is not active, the tool returns PENDING_SERVICE_ACTIVATION and instructs you to schedule electric service first with schedule_move_in_service. Required before full installation can begin. Customer will receive a link to upload garage photos. preferred_date is optional (YYYY-MM-DD). Do not say 'premise' or show internal premise numbers to the customer.", inputSchema: { type: "object", properties: { premise_number: { type: "string" }, preferred_date: { type: "string" } }, required: ["premise_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "upload_garage_requirements_status", description: "Record garage readiness for EV charger installation: whether photos have been uploaded, whether WiFi is available at the charging location, and whether a 240V circuit exists. Use after the customer completes pre-install steps.", inputSchema: { type: "object", properties: { premise_number: { type: "string" }, photos_uploaded: { type: "boolean" }, wifi_ready: { type: "boolean" }, circuit_240v_ready: { type: "boolean" }, notes: { type: "string" } }, required: ["premise_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "update_contact_info", description: "Update the email address or mobile phone number on file for a customer. customer_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { customer_number: { type: "string" }, email: { type: "string" }, mobile_phone: { type: "string" } }, required: ["customer_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "update_notification_preferences", description: "Update how the customer receives billing and outage notifications: 'sms', 'email', or 'both'. Also controls marketing opt-in. customer_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { customer_number: { type: "string" }, billing_channel: { type: "string", enum: ["sms", "email", "both"] }, outage_channel: { type: "string", enum: ["sms", "email", "both"] }, marketing_opt_in: { type: "boolean" } }, required: ["customer_number"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
@@ -2992,6 +3347,10 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
         { name: "get_peak_alerts", description: "Return high-usage alerts for recent months where kWh exceeded the account's threshold. Use to explain unexpected bill spikes or proactively alert the customer to high usage periods. account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "recommend_ev_charging_window", description: "Recommend the best time window to charge an EV to maximize off-peak savings, based on the account's EV charging pattern. Returns recommended hours and current off-peak ratio. account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "projected_next_bill", description: "Project the next bill amount using a rolling 3-month usage average with seasonal adjustment. Use for questions like 'what will my next bill be' or 'how much should I budget'. account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+        { name: "subscribe_proactive_notifications", description: "Customer-authorized proactive monitoring setup. Use when the customer asks ChatGPT to check on a schedule for outage restoration estimates, service request status, or projected bill threshold alerts. monitor_type must be outage_restoration, service_request_status, or bill_projection_threshold. For bill_projection_threshold, provide threshold_usd. A ChatGPT scheduled task or background job should call run_scheduled_notification_checks periodically. customer_number and account_number auto-resolved from login if omitted where possible.", inputSchema: { type: "object", properties: { customer_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." }, account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." }, monitor_type: { type: "string", enum: ["outage_restoration", "service_request_status", "bill_projection_threshold"] }, channel: { type: "string", enum: ["sms", "email", "both"] }, frequency_minutes: { type: "number" }, threshold_usd: { type: "number" } }, required: ["monitor_type"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+        { name: "run_scheduled_notification_checks", description: "Scheduled ChatGPT/background-job entrypoint for proactive notification checks. Safe to call every hour. Checks customer-authorized monitors for outage restoration estimates, service request status, and bill projection thresholds, then creates pending notifications without taking sensitive follow-up actions. customer_number and account_number auto-resolved from login if omitted where possible.", inputSchema: { type: "object", properties: { customer_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." }, account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+        { name: "upsert_outage_status", description: "Event-driven FPL outage update hook. Creates or updates outage status/restoration estimates for a service location and creates proactive customer notifications for affected accounts. Use for outage status, estimated restoration time, and restored events.", inputSchema: { type: "object", properties: { outage_event_id: { type: "string" }, premise_number: { type: "string" }, status: { type: "string" }, cause: { type: "string" }, estimated_restoration_at: { type: "string" }, actual_restoration_at: { type: "string" }, affected_customers: { type: "number" } }, required: ["premise_number", "status"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+        { name: "get_proactive_notifications", description: "List proactive notifications created by scheduled checks or outage events. Use at the start of a ChatGPT session or inside a scheduled task to summarize pending outage, service request, or bill threshold updates. customer_number and account_number auto-resolved from login if omitted where possible.", inputSchema: { type: "object", properties: { customer_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." }, account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." }, status: { type: "string", enum: ["PENDING", "DELIVERED"] }, limit: { type: "number" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "create_support_case", description: "Open a support case for a billing dispute, service issue, EV installation problem, or other concern. Requires category, subject, and description. priority is 'low', 'normal', or 'high'. Returns a case_id for follow-up. account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." }, category: { type: "string" }, subject: { type: "string" }, description: { type: "string" }, priority: { type: "string", enum: ["low", "normal", "high"] } }, required: ["category", "subject", "description"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "get_case_status", description: "Check the current status of a support case by case_id. Use when the customer asks for an update on an existing case.", inputSchema: { type: "object", properties: { case_id: { type: "string" } }, required: ["case_id"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "verify_identity_stepup", description: "Initiate a step-up identity verification challenge for sensitive operations (e.g. billing changes, account transfers). Sends a code via sms or email. customer_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { customer_number: { type: "string" }, method: { type: "string", enum: ["sms", "email"] } }, required: ["customer_number", "method"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
@@ -3751,6 +4110,10 @@ export {
   getPeakAlertsHandler,
   recommendEvChargingWindowHandler,
   projectedNextBillHandler,
+  subscribeProactiveNotificationsHandler,
+  runScheduledNotificationChecksHandler,
+  upsertOutageStatusHandler,
+  getProactiveNotificationsHandler,
   createSupportCaseHandler,
   getCaseStatusHandler,
   verifyIdentityStepupHandler,
