@@ -2051,6 +2051,86 @@ const createSupportCaseHandler = async ({ account_number, category, subject, des
   return supportCase;
 };
 
+const reportOutageHandler = async ({ account_number, description }: any) => {
+  const accountResult = await pool.query(
+    `SELECT account_number, customer_number, premise_number, service_address_line1, service_address_city, service_address_state, service_address_zip
+     FROM accounts
+     WHERE account_number = $1`,
+    [account_number]
+  );
+
+  if (accountResult.rows.length === 0) {
+    return {
+      status: "NOT_FOUND",
+      accountNumber: account_number,
+      message: "Account not found. Ask the customer to confirm the service address or account."
+    };
+  }
+
+  const account = accountResult.rows[0];
+  const serviceAddress = `${account.service_address_line1}, ${account.service_address_city}, ${account.service_address_state} ${account.service_address_zip}`;
+  const outageResult = await pool.query(
+    `SELECT *
+     FROM outage_events
+     WHERE premise_number = $1
+       AND LOWER(status) <> 'restored'
+     ORDER BY updated_at DESC
+     LIMIT 1`,
+    [account.premise_number]
+  );
+  const outage = outageResult.rows[0] || null;
+
+  const nearbyResult = await pool.query(
+    `SELECT COUNT(*)::int AS active_outage_count
+     FROM outage_events o
+     INNER JOIN accounts a ON a.premise_number = o.premise_number
+     WHERE LOWER(o.status) <> 'restored'
+       AND a.service_address_city = $1
+       AND a.service_address_state = $2`,
+    [account.service_address_city, account.service_address_state]
+  );
+  const nearbyOutageCount = Number(nearbyResult.rows[0]?.active_outage_count || 0);
+
+  const subject = outage
+    ? "Customer outage report - known outage found"
+    : "Customer outage report - no matching outage found";
+  const estimateText = outage?.estimated_restoration_at
+    ? ` Estimated restoration: ${outage.estimated_restoration_at}.`
+    : "";
+  const supportCase = await createSupportCaseHandler({
+    account_number,
+    category: "outage",
+    subject,
+    description: `${description || "Customer reported a power outage."} Service address: ${serviceAddress}. Known outage status: ${outage?.status || "not found"}.${estimateText}`,
+    priority: "high"
+  });
+
+  await addAudit("report_outage", {
+    account_number,
+    customer_number: account.customer_number,
+    premise_number: account.premise_number,
+    caseId: supportCase.caseId,
+    outageFound: Boolean(outage)
+  });
+
+  return {
+    status: "REPORTED",
+    accountNumber: account_number,
+    serviceAddress,
+    outageFound: Boolean(outage),
+    nearbyOutageCount,
+    outageStatus: outage?.status || null,
+    estimatedRestorationAt: outage?.estimated_restoration_at || null,
+    actualRestorationAt: outage?.actual_restoration_at || null,
+    outageCause: outage?.cause || null,
+    supportCase,
+    message: outage
+      ? `I found a known outage for your service address. Estimated restoration: ${outage.estimated_restoration_at || "not yet available"}. I also created support case ${supportCase.caseId} for tracking.`
+      : `I do not see a matching outage record for your service address yet. I created support case ${supportCase.caseId} so the outage can be investigated.`,
+    nextAction: "Offer scheduled restoration-status checks with subscribe_proactive_notifications using monitor_type='outage_restoration' if the customer wants ongoing updates."
+  };
+};
+
 const getCaseStatusHandler = async ({ case_id }: any) => {
   const result = await pool.query('SELECT * FROM support_cases WHERE case_id = $1', [case_id]);
   if (result.rows.length === 0) {
@@ -2713,7 +2793,7 @@ server.registerTool(
 server.registerTool(
   "subscribe_proactive_notifications",
   {
-    description: "Customer-authorized proactive monitoring setup. Use when the customer asks ChatGPT to check on a schedule for outage restoration estimates, service request status, or projected bill threshold alerts. monitor_type must be outage_restoration, service_request_status, or bill_projection_threshold. For bill_projection_threshold, provide threshold_usd. A ChatGPT scheduled task or background job should call run_scheduled_notification_checks periodically.",
+    description: "Customer-authorized proactive monitoring setup. If a customer says they have an outage or asks about restoration, explain any available outage status and offer to set up scheduled restoration-status checks before calling this tool. Use only after the customer agrees to scheduled checks for outage restoration estimates, service request status, or projected bill threshold alerts. monitor_type must be outage_restoration, service_request_status, or bill_projection_threshold. For bill_projection_threshold, provide threshold_usd. A ChatGPT scheduled task or background job should call run_scheduled_notification_checks periodically.",
     inputSchema: {
       customer_number: z.string(),
       account_number: z.string().optional(),
@@ -2729,7 +2809,7 @@ server.registerTool(
 server.registerTool(
   "run_scheduled_notification_checks",
   {
-    description: "Scheduled ChatGPT/background-job entrypoint for proactive notification checks. Safe to call every hour. Checks customer-authorized monitors for outage restoration estimates, service request status, and bill projection thresholds, then creates pending notifications without taking sensitive follow-up actions.",
+    description: "Only scheduled ChatGPT/background-job entrypoint for proactive notification checks. Safe to call every hour. ChatGPT scheduled tasks should call this one tool, not try to choose separate outage, billing, or service-order tools. Checks customer-authorized monitors for outage restoration estimates, service request status, and bill projection thresholds, then creates pending notifications without taking sensitive follow-up actions.",
     inputSchema: {
       customer_number: z.string().optional(),
       account_number: z.string().optional()
@@ -2767,6 +2847,18 @@ server.registerTool(
     }
   },
   async (input) => jsonContent(await getProactiveNotificationsHandler(input))
+);
+
+server.registerTool(
+  "report_outage",
+  {
+    description: "Use this when a customer says they have an outage, power is out, lights are out, or asks to report an outage. Checks known outage records for the customer's service address and nearby service area, creates a high-priority outage support case either way, returns any known restoration estimate, and then you should offer scheduled restoration-status checks with subscribe_proactive_notifications if the customer wants ongoing updates.",
+    inputSchema: {
+      account_number: z.string(),
+      description: z.string().optional()
+    }
+  },
+  async (input) => jsonContent(await reportOutageHandler(input))
 );
 
 server.registerTool(
@@ -2987,6 +3079,7 @@ const ACCOUNT_SCOPED_TOOLS = new Set([
   "subscribe_proactive_notifications",
   "run_scheduled_notification_checks",
   "get_proactive_notifications",
+  "report_outage",
   "create_support_case"
 ]);
 
@@ -3347,10 +3440,11 @@ const handleMcpRequest = async (request: IncomingMessage, response: ServerRespon
         { name: "get_peak_alerts", description: "Return high-usage alerts for recent months where kWh exceeded the account's threshold. Use to explain unexpected bill spikes or proactively alert the customer to high usage periods. account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "recommend_ev_charging_window", description: "Recommend the best time window to charge an EV to maximize off-peak savings, based on the account's EV charging pattern. Returns recommended hours and current off-peak ratio. account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "projected_next_bill", description: "Project the next bill amount using a rolling 3-month usage average with seasonal adjustment. Use for questions like 'what will my next bill be' or 'how much should I budget'. account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
-        { name: "subscribe_proactive_notifications", description: "Customer-authorized proactive monitoring setup. Use when the customer asks ChatGPT to check on a schedule for outage restoration estimates, service request status, or projected bill threshold alerts. monitor_type must be outage_restoration, service_request_status, or bill_projection_threshold. For bill_projection_threshold, provide threshold_usd. A ChatGPT scheduled task or background job should call run_scheduled_notification_checks periodically. customer_number and account_number auto-resolved from login if omitted where possible.", inputSchema: { type: "object", properties: { customer_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." }, account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." }, monitor_type: { type: "string", enum: ["outage_restoration", "service_request_status", "bill_projection_threshold"] }, channel: { type: "string", enum: ["sms", "email", "both"] }, frequency_minutes: { type: "number" }, threshold_usd: { type: "number" } }, required: ["monitor_type"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
-        { name: "run_scheduled_notification_checks", description: "Scheduled ChatGPT/background-job entrypoint for proactive notification checks. Safe to call every hour. Checks customer-authorized monitors for outage restoration estimates, service request status, and bill projection thresholds, then creates pending notifications without taking sensitive follow-up actions. customer_number and account_number auto-resolved from login if omitted where possible.", inputSchema: { type: "object", properties: { customer_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." }, account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+        { name: "subscribe_proactive_notifications", description: "Customer-authorized proactive monitoring setup. If a customer says they have an outage or asks about restoration, explain any available outage status and offer to set up scheduled restoration-status checks before calling this tool. Use only after the customer agrees to scheduled checks for outage restoration estimates, service request status, or projected bill threshold alerts. monitor_type must be outage_restoration, service_request_status, or bill_projection_threshold. For bill_projection_threshold, provide threshold_usd. A ChatGPT scheduled task or background job should call run_scheduled_notification_checks periodically. customer_number and account_number auto-resolved from login if omitted where possible.", inputSchema: { type: "object", properties: { customer_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." }, account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." }, monitor_type: { type: "string", enum: ["outage_restoration", "service_request_status", "bill_projection_threshold"] }, channel: { type: "string", enum: ["sms", "email", "both"] }, frequency_minutes: { type: "number" }, threshold_usd: { type: "number" } }, required: ["monitor_type"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+        { name: "run_scheduled_notification_checks", description: "Only scheduled ChatGPT/background-job entrypoint for proactive notification checks. Safe to call every hour. ChatGPT scheduled tasks should call this one tool, not try to choose separate outage, billing, or service-order tools. Checks customer-authorized monitors for outage restoration estimates, service request status, and bill projection thresholds, then creates pending notifications without taking sensitive follow-up actions. customer_number and account_number auto-resolved from login if omitted where possible.", inputSchema: { type: "object", properties: { customer_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." }, account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "upsert_outage_status", description: "Event-driven FPL outage update hook. Creates or updates outage status/restoration estimates for a service location and creates proactive customer notifications for affected accounts. Use for outage status, estimated restoration time, and restored events.", inputSchema: { type: "object", properties: { outage_event_id: { type: "string" }, premise_number: { type: "string" }, status: { type: "string" }, cause: { type: "string" }, estimated_restoration_at: { type: "string" }, actual_restoration_at: { type: "string" }, affected_customers: { type: "number" } }, required: ["premise_number", "status"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "get_proactive_notifications", description: "List proactive notifications created by scheduled checks or outage events. Use at the start of a ChatGPT session or inside a scheduled task to summarize pending outage, service request, or bill threshold updates. customer_number and account_number auto-resolved from login if omitted where possible.", inputSchema: { type: "object", properties: { customer_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." }, account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." }, status: { type: "string", enum: ["PENDING", "DELIVERED"] }, limit: { type: "number" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+        { name: "report_outage", description: "Use this when a customer says they have an outage, power is out, lights are out, or asks to report an outage. Checks known outage records for the customer's service address and nearby service area, creates a high-priority outage support case either way, returns any known restoration estimate, and then offer scheduled restoration-status checks with subscribe_proactive_notifications if the customer wants ongoing updates. account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." }, description: { type: "string" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "create_support_case", description: "Open a support case for a billing dispute, service issue, EV installation problem, or other concern. Requires category, subject, and description. priority is 'low', 'normal', or 'high'. Returns a case_id for follow-up. account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." }, category: { type: "string" }, subject: { type: "string" }, description: { type: "string" }, priority: { type: "string", enum: ["low", "normal", "high"] } }, required: ["category", "subject", "description"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "get_case_status", description: "Check the current status of a support case by case_id. Use when the customer asks for an update on an existing case.", inputSchema: { type: "object", properties: { case_id: { type: "string" } }, required: ["case_id"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
         { name: "verify_identity_stepup", description: "Initiate a step-up identity verification challenge for sensitive operations (e.g. billing changes, account transfers). Sends a code via sms or email. customer_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { customer_number: { type: "string" }, method: { type: "string", enum: ["sms", "email"] } }, required: ["customer_number", "method"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
@@ -4114,6 +4208,7 @@ export {
   runScheduledNotificationChecksHandler,
   upsertOutageStatusHandler,
   getProactiveNotificationsHandler,
+  reportOutageHandler,
   createSupportCaseHandler,
   getCaseStatusHandler,
   verifyIdentityStepupHandler,

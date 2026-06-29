@@ -216,6 +216,42 @@ describe('Remaining Handler Tests', () => {
       expect(check.status).toBe('CHECKED');
       expect(check.notifications.some((notification: any) => notification.event_type === 'service_request_status')).toBe(true);
     });
+
+    it('should report outage and include known restoration estimate when an outage exists', async () => {
+      await handlers.upsertOutageStatusHandler({
+        outage_event_id: 'OUTAGE-TEST-REPORT-001',
+        premise_number: '60412233',
+        status: 'estimated_restoration',
+        cause: 'equipment',
+        estimated_restoration_at: '2026-06-30T01:00:00Z',
+        affected_customers: 80
+      });
+
+      const result = await handlers.reportOutageHandler({
+        account_number: '5210099001',
+        description: 'Customer says power is out.'
+      });
+
+      expect(result.status).toBe('REPORTED');
+      expect(result.outageFound).toBe(true);
+      expect(result.estimatedRestorationAt).toBeDefined();
+      expect(result.supportCase).toBeDefined();
+      expect(result.supportCase.category).toBe('outage');
+      expect(result.supportCase.priority).toBe('high');
+    });
+
+    it('should report outage and create ticket when no outage record exists', async () => {
+      const result = await handlers.reportOutageHandler({
+        account_number: '5220099002',
+        description: 'Customer says power is out.'
+      });
+
+      expect(result.status).toBe('REPORTED');
+      expect(result.outageFound).toBe(false);
+      expect(result.supportCase).toBeDefined();
+      expect(result.supportCase.category).toBe('outage');
+      expect(result.supportCase.priority).toBe('high');
+    });
   });
 
   describe('Authorized Users', () => {
