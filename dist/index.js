@@ -1745,8 +1745,8 @@ const reportOutageHandler = async ({ account_number, description }) => {
         message: outage
             ? `I found a known outage for your service address. Estimated restoration: ${outage.estimated_restoration_at || "not yet available"}. I also created support case ${supportCase.caseId} for tracking.`
             : `I do not see a matching outage record for your service address yet. I created support case ${supportCase.caseId} so the outage can be investigated.`,
-        schedulePrompt: "If you want ChatGPT to check this outage status later, type `add in schedule` and ChatGPT can call run_scheduled_notification_checks every hour.",
-        nextAction: "For outage status follow-up, use run_scheduled_notification_checks or have the customer type `add in schedule`."
+        schedulePrompt: "If you want ChatGPT to check this outage status later, type `add in schedule` and ChatGPT can call get_outage_status every hour.",
+        nextAction: "For outage status follow-up, use get_outage_status or have the customer type `add in schedule`."
     };
 };
 const getCaseStatusHandler = async ({ case_id }) => {
@@ -2171,7 +2171,7 @@ const createFplMcpServer = () => {
         }
     }, async (input) => jsonContent(await projectedNextBillHandler(input)));
     server.registerTool("subscribe_proactive_notifications", {
-        description: "Customer-authorized proactive monitoring setup for service request status or projected bill threshold alerts. Do NOT use this tool for outage follow-up; after report_outage use run_scheduled_notification_checks for scheduled status updates or tell the customer to type `add in schedule`. monitor_type must be service_request_status or bill_projection_threshold. For bill_projection_threshold, provide threshold_usd. A ChatGPT scheduled task or background job should call run_scheduled_notification_checks periodically.",
+        description: "Customer-authorized proactive monitoring setup for service request status or projected bill threshold alerts. Do NOT use this tool for outage follow-up; after report_outage use get_outage_status for scheduled status updates or tell the customer to type `add in schedule`. monitor_type must be service_request_status or bill_projection_threshold. For bill_projection_threshold, provide threshold_usd. A ChatGPT scheduled task or background job should call run_scheduled_notification_checks periodically.",
         inputSchema: {
             customer_number: z.string(),
             account_number: z.string().optional(),
@@ -2182,7 +2182,7 @@ const createFplMcpServer = () => {
         }
     }, async (input) => jsonContent(await subscribeProactiveNotificationsHandler(input)));
     server.registerTool("run_scheduled_notification_checks", {
-        description: "Scheduled ChatGPT/background-job entrypoint for proactive notification checks and outage status updates. Safe to call every hour. Returns outage status updates for the customer or account every time, including restoration estimate, cause, and latest outage support-case update, even when no proactive subscriptions exist. Also creates pending notifications for service request status and bill projection threshold monitors.",
+        description: "Scheduled ChatGPT/background-job entrypoint for proactive notification checks. Safe to call every hour. Creates pending notifications for service request status and bill projection threshold monitors. For outage status updates, use get_outage_status instead.",
         inputSchema: {
             customer_number: z.string().optional(),
             account_number: z.string().optional()
@@ -2210,14 +2210,14 @@ const createFplMcpServer = () => {
         }
     }, async (input) => jsonContent(await getProactiveNotificationsHandler(input)));
     server.registerTool("report_outage", {
-        description: "Use this when a customer says they have an outage, power is out, lights are out, or asks to report an outage. Checks known outage records for the customer's service address and nearby service area, creates a high-priority outage support case either way, returns any known restoration estimate, and includes a schedule prompt. For ongoing outage status updates, set up a scheduled task that calls run_scheduled_notification_checks when the customer types `add in schedule`.",
+        description: "Use this when a customer says they have an outage, power is out, lights are out, or asks to report an outage. Checks known outage records for the customer's service address and nearby service area, creates a high-priority outage support case either way, returns any known restoration estimate, and includes a schedule prompt. For ongoing outage status updates, set up a scheduled task that calls get_outage_status when the customer types `add in schedule`.",
         inputSchema: {
             account_number: z.string(),
             description: z.string().optional()
         }
     }, async (input) => jsonContent(await reportOutageHandler(input)));
     server.registerTool("get_outage_status", {
-        description: "Get the current outage restoration status for a customer or account. Returns the latest outage status, estimated restoration time, actual restoration time, cause, and any recent outage support-case update. Use this for scheduled outage status checks or customer-initiated outage status lookups. Safe to call repeatedly; it does not create support cases or notifications.",
+        description: "Get the current outage restoration status for a customer or account. Returns the latest outage status, estimated restoration time, actual restoration time, cause, and any recent outage support-case update. Use this for scheduled outage status checks (e.g., every hour) or customer-initiated outage status lookups. Safe to call repeatedly; it does not create support cases or notifications.",
         inputSchema: {
             customer_number: z.string().optional(),
             account_number: z.string().optional()
