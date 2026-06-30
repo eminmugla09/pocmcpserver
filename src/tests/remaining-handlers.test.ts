@@ -307,6 +307,32 @@ describe('Remaining Handler Tests', () => {
       expect(outageNotification.message).toContain('is OPEN');
     });
 
+    it('should return outage status updates from scheduled check even without subscriptions', async () => {
+      await handlers.upsertOutageStatusHandler({
+        outage_event_id: 'OUTAGE-SCHEDULED-002',
+        premise_number: '60412233',
+        status: 'restored',
+        cause: 'weather',
+        actual_restoration_at: '2026-06-30T06:00:00Z',
+        affected_customers: 100
+      });
+
+      const result = await handlers.runScheduledNotificationChecksHandler({
+        account_number: '5210099001'
+      });
+
+      expect(result.status).toBe('CHECKED');
+      expect(result.subscriptionsChecked).toBe(0);
+      expect(result.outageStatusUpdates).toBeDefined();
+      expect(result.outageStatusUpdates.length).toBeGreaterThanOrEqual(1);
+      const update = result.outageStatusUpdates[0];
+      expect(update.accountNumber).toBe('5210099001');
+      expect(update.outageFound).toBe(true);
+      expect(update.outageStatus).toBe('restored');
+      expect(update.actualRestorationAt).toBeDefined();
+      expect(update.statusAvailable).toBe(true);
+    });
+
     it('should report outage and include known restoration estimate when an outage exists', async () => {
       await handlers.upsertOutageStatusHandler({
         outage_event_id: 'OUTAGE-TEST-REPORT-001',
