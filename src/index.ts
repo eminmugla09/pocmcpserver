@@ -2955,7 +2955,7 @@ server.registerTool(
 server.registerTool(
   "get_outage_status",
   {
-    description: "Get the current outage restoration status for a customer or account. Returns the latest outage status, estimated restoration time, actual restoration time, cause, and any recent outage support-case update. Use this for scheduled outage status checks (e.g., every hour) or customer-initiated outage status lookups. Safe to call repeatedly; it does not create support cases or notifications.",
+    description: "Get the current outage restoration status for a customer or account. Returns the latest outage status, estimated restoration time, actual restoration time, cause, and any recent outage support-case update. Use this for scheduled outage status checks (e.g., every hour) or customer-initiated outage status lookups. When the customer asks about an outage or a support case with category 'outage', use this tool instead of get_case_status. Safe to call repeatedly; it does not create support cases or notifications.",
     inputSchema: {
       customer_number: z.string().optional(),
       account_number: z.string().optional()
@@ -2982,7 +2982,7 @@ server.registerTool(
 server.registerTool(
   "get_case_status",
   {
-    description: "Get support case status by case id.",
+    description: "Get support case status by case id. Use for non-outage cases. For outage status, including restoration estimate, outage cause, and any recent outage support-case update, use get_outage_status instead.",
     inputSchema: {
       case_id: z.string()
     }
