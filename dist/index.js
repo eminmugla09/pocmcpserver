@@ -2224,7 +2224,7 @@ const createFplMcpServer = () => {
         }
     }, async (input) => jsonContent(await reportOutageHandler(input)));
     server.registerTool("get_outage_status", {
-        description: "Get the current outage restoration status for a customer, account, or outage support case. Returns the latest outage status, estimated restoration time, actual restoration time, cause, and any recent outage support-case update. Use this for scheduled outage status checks (e.g., every hour) or customer-initiated outage status lookups. When the customer mentions an outage support case_id, use this tool instead of get_case_status. Safe to call repeatedly; it does not create support cases or notifications.",
+        description: "Use this tool when the customer asks about outage status, restoration estimate, whether power is restored, or mentions an outage support case. It returns the latest outage status, estimated restoration time, actual restoration time, cause, and any recent outage support-case update. It accepts account_number, customer_number, or case_id. Do NOT use get_case_status for outage-related questions; use this tool instead. Safe to call repeatedly; it does not create support cases or notifications.",
         inputSchema: {
             customer_number: z.string().optional(),
             account_number: z.string().optional(),
@@ -2242,7 +2242,7 @@ const createFplMcpServer = () => {
         }
     }, async (input) => jsonContent(await createSupportCaseHandler(input)));
     server.registerTool("get_case_status", {
-        description: "Get support case status by case id. Do NOT use for outage support cases (category = 'outage'). For outage status, including restoration estimate, outage cause, and any recent outage support-case update, use get_outage_status instead.",
+        description: "Get support case status by case id. Only use when the customer asks about a support case and does NOT mention outage status, restoration estimate, power restored, or an outage support case. Do NOT use for outage support cases (category = 'outage'); for outage status, use get_outage_status instead.",
         inputSchema: {
             case_id: z.string()
         }
