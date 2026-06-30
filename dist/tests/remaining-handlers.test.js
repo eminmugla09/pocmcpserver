@@ -211,9 +211,9 @@ describe('Remaining Handler Tests', () => {
             expect(result.supportCase).toBeDefined();
             expect(result.supportCase.category).toBe('outage');
             expect(result.supportCase.priority).toBe('high');
-            expect(result.scheduledCheckOffer).toContain('scheduled checks');
-            expect(result.scheduledCheckTool).toBe('subscribe_proactive_notifications');
-            expect(result.scheduledCheckInput.monitor_type).toBe('outage_restoration');
+            expect(result.schedulePrompt).toContain('add in schedule');
+            expect(result.scheduledCheckTool).toBeUndefined();
+            expect(result.scheduledCheckInput).toBeUndefined();
         });
         it('should report outage and create ticket when no outage record exists', async () => {
             const result = await handlers.reportOutageHandler({
@@ -225,9 +225,9 @@ describe('Remaining Handler Tests', () => {
             expect(result.supportCase).toBeDefined();
             expect(result.supportCase.category).toBe('outage');
             expect(result.supportCase.priority).toBe('high');
-            expect(result.scheduledCheckOffer).toContain('scheduled checks');
-            expect(result.scheduledCheckTool).toBe('subscribe_proactive_notifications');
-            expect(result.scheduledCheckInput.monitor_type).toBe('outage_restoration');
+            expect(result.schedulePrompt).toContain('add in schedule');
+            expect(result.scheduledCheckTool).toBeUndefined();
+            expect(result.scheduledCheckInput).toBeUndefined();
         });
     });
     describe('Authorized Users', () => {
