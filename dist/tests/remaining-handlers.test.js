@@ -152,7 +152,11 @@ describe('Remaining Handler Tests', () => {
             expect(Array.isArray(notifications)).toBe(true);
             expect(notifications.some((notification) => notification.eventType === 'bill_projection_threshold')).toBe(true);
         });
-        it('should create outage restoration notifications from event updates', async () => {
+        it('should create outage restoration notifications with support case update from event updates', async () => {
+            const report = await handlers.reportOutageHandler({
+                account_number: '5210099001',
+                description: 'Coverage outage report'
+            });
             const result = await handlers.upsertOutageStatusHandler({
                 outage_event_id: 'OUTAGE-TEST-001',
                 premise_number: '60412233',
@@ -168,7 +172,53 @@ describe('Remaining Handler Tests', () => {
                 customer_number: '1009988776',
                 account_number: '5210099001'
             });
-            expect(notifications.some((notification) => notification.eventType === 'outage_restoration')).toBe(true);
+            const outageNotifications = notifications.filter((notification) => notification.eventType === 'outage_restoration');
+            expect(outageNotifications.length).toBeGreaterThanOrEqual(1);
+            expect(outageNotifications[0].message).toContain(`Support case ${report.supportCase.caseId}`);
+            expect(outageNotifications[0].message).toContain('is OPEN');
+        });
+        it('should get outage status with restoration estimate and support case update', async () => {
+            await handlers.upsertOutageStatusHandler({
+                outage_event_id: 'OUTAGE-SCHEDULED-001',
+                premise_number: '60412233',
+                status: 'estimated_restoration',
+                cause: 'weather',
+                estimated_restoration_at: '2026-06-30T02:00:00Z',
+                affected_customers: 95
+            });
+            const report = await handlers.reportOutageHandler({
+                account_number: '5210099001',
+                description: 'Coverage outage status test'
+            });
+            const result = await handlers.getOutageStatusHandler({
+                account_number: '5210099001'
+            });
+            expect(result.status).toBe('OK');
+            expect(result.outageStatusUpdates).toBeDefined();
+            expect(Array.isArray(result.outageStatusUpdates)).toBe(true);
+            expect(result.outageStatusUpdates.length).toBeGreaterThanOrEqual(1);
+            const update = result.outageStatusUpdates[0];
+            expect(update.accountNumber).toBe('5210099001');
+            expect(update.outageFound).toBe(true);
+            expect(update.outageStatus).toBe('estimated_restoration');
+            expect(update.estimatedRestorationAt).toBeDefined();
+            expect(update.statusAvailable).toBe(true);
+            expect(update.supportCaseUpdate).toBeDefined();
+            expect(update.supportCaseUpdate?.caseId).toBe(report.supportCase.caseId);
+        });
+        it('should return outage status unavailable when no outage or support case exists', async () => {
+            const result = await handlers.getOutageStatusHandler({
+                account_number: '5220099002'
+            });
+            expect(result.status).toBe('OK');
+            expect(result.outageStatusUpdates).toBeDefined();
+            expect(Array.isArray(result.outageStatusUpdates)).toBe(true);
+            expect(result.outageStatusUpdates.length).toBeGreaterThanOrEqual(1);
+            const update = result.outageStatusUpdates[0];
+            expect(update.accountNumber).toBe('5220099002');
+            expect(update.outageFound).toBe(false);
+            expect(update.statusAvailable).toBe(false);
+            expect(update.unavailableReason).toBe('No outage record or outage support case found for this account.');
         });
         it('should create service request status notifications through scheduled checks', async () => {
             await handlers.startStopTransferServiceHandler({
@@ -191,6 +241,31 @@ describe('Remaining Handler Tests', () => {
             });
             expect(check.status).toBe('CHECKED');
             expect(check.notifications.some((notification) => notification.event_type === 'service_request_status')).toBe(true);
+        });
+        it('should create outage restoration notifications with support case update through scheduled checks', async () => {
+            const report = await handlers.reportOutageHandler({
+                account_number: '5210099001',
+                description: 'Coverage outage report for scheduled check'
+            });
+            await handlers.upsertOutageStatusHandler({
+                outage_event_id: 'OUTAGE-SCHEDULED-CHECK-001',
+                premise_number: '60412233',
+                status: 'active',
+                cause: 'weather',
+                estimated_restoration_at: '2026-06-30T05:00:00Z',
+                affected_customers: 60
+            });
+            await mainPool.query(`INSERT INTO proactive_notification_subscriptions (customer_number, account_number, monitor_type, channel, frequency_minutes, enabled)
+         VALUES ($1, $2, $3, $4, $5, TRUE)`, ['1009988776', '5210099001', 'outage_restoration', 'email', 1]);
+            const check = await handlers.runScheduledNotificationChecksHandler({
+                customer_number: '1009988776',
+                account_number: '5210099001'
+            });
+            expect(check.status).toBe('CHECKED');
+            const outageNotification = check.notifications.find((notification) => notification.event_type === 'outage_restoration');
+            expect(outageNotification).toBeDefined();
+            expect(outageNotification.message).toContain(`Support case ${report.supportCase.caseId}`);
+            expect(outageNotification.message).toContain('is OPEN');
         });
         it('should report outage and include known restoration estimate when an outage exists', async () => {
             await handlers.upsertOutageStatusHandler({

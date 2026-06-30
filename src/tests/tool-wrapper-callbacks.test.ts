@@ -40,7 +40,7 @@ describe('Registered Tool Wrapper Callback Coverage', () => {
 
     expect(tools).toBeDefined();
     const toolNames = Object.keys(tools);
-    expect(toolNames.length).toBe(48);
+    expect(toolNames.length).toBe(54);
 
     const vehicleRegistration = parseToolText(
       await tools.register_vehicle.handler({
@@ -127,7 +127,13 @@ describe('Registered Tool Wrapper Callback Coverage', () => {
       create_support_case: { account_number: '5210099001', category: 'billing', subject: 'Wrapper test case', description: 'Created by wrapper callback coverage', priority: 'low' },
       get_case_status: { case_id: caseId },
       verify_identity_stepup: { customer_number: '1009988776', method: 'sms' },
-      audit_activity_log: { account_number: '5210099001', limit: 10 }
+      audit_activity_log: { account_number: '5210099001', limit: 10 },
+      subscribe_proactive_notifications: { customer_number: '1009988776', account_number: '5210099001', monitor_type: 'service_request_status', channel: 'email', frequency_minutes: 1 },
+      run_scheduled_notification_checks: { customer_number: '1009988776', account_number: '5210099001' },
+      upsert_outage_status: { outage_event_id: 'OUTAGE-WRAPPER-001', premise_number: '60412233', status: 'restored', cause: 'weather', estimated_restoration_at: '2026-06-30T06:00:00Z', affected_customers: 100 },
+      get_proactive_notifications: { customer_number: '1009988776', account_number: '5210099001', limit: 10 },
+      report_outage: { account_number: '5210099001', description: 'Coverage test outage report' },
+      get_outage_status: { account_number: '5210099001' }
     };
 
     for (const toolName of toolNames) {

@@ -1868,6 +1868,71 @@ const getProactiveNotificationsHandler = async ({ customer_number, account_numbe
   }));
 };
 
+const buildOutageStatusUpdate = async ({ customer_number, account_number }: any) => {
+  const accountResult = await pool.query(
+    `SELECT account_number, customer_number, premise_number, service_address_line1, service_address_city, service_address_state, service_address_zip
+     FROM accounts
+     WHERE ($1::text = '' OR customer_number = $1)
+       AND ($2::text = '' OR account_number = $2)`,
+    [customer_number || '', account_number || '']
+  );
+
+  const updates = [];
+  for (const account of accountResult.rows) {
+    const serviceAddress = `${account.service_address_line1}, ${account.service_address_city}, ${account.service_address_state} ${account.service_address_zip}`;
+    const outageResult = await pool.query(
+      `SELECT *
+       FROM outage_events
+       WHERE premise_number = $1
+       ORDER BY updated_at DESC
+       LIMIT 1`,
+      [account.premise_number]
+    );
+    const outage = outageResult.rows[0] || null;
+
+    const caseResult = await pool.query(
+      `SELECT case_id, status, subject, priority, updated_at
+       FROM support_cases
+       WHERE account_number = $1 AND category = 'outage'
+       ORDER BY updated_at DESC
+       LIMIT 1`,
+      [account.account_number]
+    );
+    const supportCase = caseResult.rows[0] || null;
+
+    updates.push({
+      accountNumber: account.account_number,
+      serviceAddress,
+      outageFound: Boolean(outage),
+      outageStatus: outage?.status || null,
+      estimatedRestorationAt: outage?.estimated_restoration_at || null,
+      actualRestorationAt: outage?.actual_restoration_at || null,
+      outageCause: outage?.cause || null,
+      supportCaseUpdate: supportCase
+        ? {
+            caseId: supportCase.case_id,
+            status: supportCase.status,
+            subject: supportCase.subject,
+            priority: supportCase.priority,
+            updatedAt: supportCase.updated_at
+          }
+        : null,
+      statusAvailable: Boolean(outage || supportCase),
+      unavailableReason: outage || supportCase ? null : "No outage record or outage support case found for this account."
+    });
+  }
+
+  return updates;
+};
+
+const getOutageStatusHandler = async ({ customer_number, account_number }: any) => {
+  const outageStatusUpdates = await buildOutageStatusUpdate({ customer_number, account_number });
+  return {
+    status: "OK",
+    outageStatusUpdates
+  };
+};
+
 const upsertOutageStatusHandler = async ({ outage_event_id, premise_number, status, cause, estimated_restoration_at, actual_restoration_at, affected_customers }: any) => {
   const outageEventId = outage_event_id || makeId("OUTAGE");
   const result = await pool.query(
@@ -1898,12 +1963,22 @@ const upsertOutageStatusHandler = async ({ outage_event_id, premise_number, stat
     const serviceAddress = `${account.service_address_line1}, ${account.service_address_city}, ${account.service_address_state} ${account.service_address_zip}`;
     const estimateText = outage.estimated_restoration_at ? ` Estimated restoration: ${outage.estimated_restoration_at}.` : "";
     const restoredText = outage.actual_restoration_at ? ` Restored at: ${outage.actual_restoration_at}.` : "";
+    const caseResult = await pool.query(
+      `SELECT case_id, status, subject, priority, updated_at
+       FROM support_cases
+       WHERE account_number = $1 AND category = 'outage'
+       ORDER BY updated_at DESC
+       LIMIT 1`,
+      [account.account_number]
+    );
+    const supportCase = caseResult.rows[0] || null;
+    const supportCaseText = supportCase ? ` Support case ${supportCase.case_id} is ${supportCase.status}.` : "";
     const notification = await createProactiveNotification({
       customerNumber: account.customer_number,
       accountNumber: account.account_number,
       eventType: "outage_restoration",
       title: status.toLowerCase() === "restored" ? "Power restored" : "Outage status update",
-      message: `Outage update for ${serviceAddress}: ${status}.${estimateText}${restoredText}`,
+      message: `Outage update for ${serviceAddress}: ${status}.${estimateText}${restoredText}${supportCaseText}`,
       severity: status.toLowerCase() === "restored" ? "info" : "warning",
       payload: outage,
       dedupeKey: `outage:${outageEventId}:${account.account_number}:${status}:${estimated_restoration_at || ''}:${actual_restoration_at || ''}`
@@ -1948,13 +2023,23 @@ const runScheduledNotificationChecksHandler = async ({ customer_number, account_
 
       for (const outage of outageResult.rows) {
         const serviceAddress = `${outage.service_address_line1}, ${outage.service_address_city}, ${outage.service_address_state} ${outage.service_address_zip}`;
+        const caseResult = await pool.query(
+          `SELECT case_id, status, subject, priority, updated_at
+           FROM support_cases
+           WHERE account_number = $1 AND category = 'outage'
+           ORDER BY updated_at DESC
+           LIMIT 1`,
+          [outage.account_number]
+        );
+        const supportCase = caseResult.rows[0] || null;
+        const supportCaseText = supportCase ? ` Support case ${supportCase.case_id} is ${supportCase.status}.` : "";
         const notification = await createProactiveNotification({
           subscriptionId: subscription.id,
           customerNumber: outage.customer_number,
           accountNumber: outage.account_number,
           eventType: "outage_restoration",
           title: outage.status.toLowerCase() === "restored" ? "Power restored" : "Outage restoration estimate",
-          message: `Outage status for ${serviceAddress}: ${outage.status}. Estimated restoration: ${outage.estimated_restoration_at || "not yet available"}.`,
+          message: `Outage status for ${serviceAddress}: ${outage.status}. Estimated restoration: ${outage.estimated_restoration_at || "not yet available"}.${supportCaseText}`,
           severity: outage.status.toLowerCase() === "restored" ? "info" : "warning",
           payload: outage,
           dedupeKey: `scheduled:outage:${subscription.id}:${outage.outage_event_id}:${outage.status}:${outage.estimated_restoration_at || ''}:${outage.actual_restoration_at || ''}`
@@ -2128,8 +2213,8 @@ const reportOutageHandler = async ({ account_number, description }: any) => {
     message: outage
       ? `I found a known outage for your service address. Estimated restoration: ${outage.estimated_restoration_at || "not yet available"}. I also created support case ${supportCase.caseId} for tracking.`
       : `I do not see a matching outage record for your service address yet. I created support case ${supportCase.caseId} so the outage can be investigated.`,
-    schedulePrompt: "If you want ChatGPT to check this outage status later, type `add in schedule` and ChatGPT can add it to your schedules.",
-    nextAction: "Do NOT call subscribe_proactive_notifications for this outage follow-up. Tell the customer: 'If you want ChatGPT to check this outage status later, type `add in schedule` and ChatGPT can add it to your schedules.'"
+    schedulePrompt: "If you want ChatGPT to check this outage status later, type `add in schedule` and ChatGPT can call get_outage_status every hour.",
+    nextAction: "For outage status follow-up, use get_outage_status or have the customer type `add in schedule`."
   };
 };
 
@@ -2796,7 +2881,7 @@ server.registerTool(
 server.registerTool(
   "subscribe_proactive_notifications",
   {
-    description: "Customer-authorized proactive monitoring setup for service request status or projected bill threshold alerts. Do NOT use this tool for outage follow-up; after report_outage, tell the customer to type `add in schedule` if they want ChatGPT to check the outage status later. monitor_type must be service_request_status or bill_projection_threshold. For bill_projection_threshold, provide threshold_usd. A ChatGPT scheduled task or background job should call run_scheduled_notification_checks periodically.",
+    description: "Customer-authorized proactive monitoring setup for service request status or projected bill threshold alerts. Do NOT use this tool for outage follow-up; after report_outage use get_outage_status for scheduled status updates or tell the customer to type `add in schedule`. monitor_type must be service_request_status or bill_projection_threshold. For bill_projection_threshold, provide threshold_usd. A ChatGPT scheduled task or background job should call run_scheduled_notification_checks periodically.",
     inputSchema: {
       customer_number: z.string(),
       account_number: z.string().optional(),
@@ -2812,7 +2897,7 @@ server.registerTool(
 server.registerTool(
   "run_scheduled_notification_checks",
   {
-    description: "Only scheduled ChatGPT/background-job entrypoint for proactive notification checks. Safe to call every hour. ChatGPT scheduled tasks should call this one tool for customer-authorized service request status and bill projection threshold monitors. Do not use this for outage follow-up; after report_outage, tell the customer to type `add in schedule` if they want ChatGPT to check the outage status later. Creates pending notifications without taking sensitive follow-up actions.",
+    description: "Only scheduled ChatGPT/background-job entrypoint for proactive notification checks. Safe to call every hour. ChatGPT scheduled tasks should call this one tool for customer-authorized service request status and bill projection threshold monitors. Do not use this for outage follow-up; use get_outage_status for that. Creates pending notifications without taking sensitive follow-up actions.",
     inputSchema: {
       customer_number: z.string().optional(),
       account_number: z.string().optional()
@@ -2855,13 +2940,25 @@ server.registerTool(
 server.registerTool(
   "report_outage",
   {
-    description: "Use this when a customer says they have an outage, power is out, lights are out, or asks to report an outage. Checks known outage records for the customer's service address and nearby service area, creates a high-priority outage support case either way, returns any known restoration estimate, and includes schedulePrompt. Do NOT call subscribe_proactive_notifications for outage follow-up. After reporting the outage, tell the customer: 'If you want ChatGPT to check this outage status later, type `add in schedule` and ChatGPT can add it to your schedules.'",
+    description: "Use this when a customer says they have an outage, power is out, lights are out, or asks to report an outage. Checks known outage records for the customer's service address and nearby service area, creates a high-priority outage support case either way, returns any known restoration estimate, and includes a schedule prompt. For ongoing outage status updates, use get_outage_status or set up a scheduled task that calls get_outage_status when the customer types `add in schedule`.",
     inputSchema: {
       account_number: z.string(),
       description: z.string().optional()
     }
   },
   async (input) => jsonContent(await reportOutageHandler(input))
+);
+
+server.registerTool(
+  "get_outage_status",
+  {
+    description: "Get the current outage restoration status for a customer or account. Returns the latest outage status, estimated restoration time, actual restoration time, cause, and any recent outage support-case update. Use this for scheduled outage status checks or customer-initiated outage status lookups. Safe to call repeatedly; it does not create support cases or notifications.",
+    inputSchema: {
+      customer_number: z.string().optional(),
+      account_number: z.string().optional()
+    }
+  },
+  async (input) => jsonContent(await getOutageStatusHandler(input))
 );
 
 server.registerTool(
@@ -3083,6 +3180,7 @@ const ACCOUNT_SCOPED_TOOLS = new Set([
   "run_scheduled_notification_checks",
   "get_proactive_notifications",
   "report_outage",
+  "get_outage_status",
   "create_support_case"
 ]);
 
@@ -3095,6 +3193,7 @@ const CUSTOMER_SCOPED_TOOLS = new Set([
   "subscribe_proactive_notifications",
   "run_scheduled_notification_checks",
   "get_proactive_notifications",
+  "get_outage_status",
   "set_preferred_language",
   "verify_identity_stepup"
 ]);
@@ -4212,6 +4311,7 @@ export {
   upsertOutageStatusHandler,
   getProactiveNotificationsHandler,
   reportOutageHandler,
+  getOutageStatusHandler,
   createSupportCaseHandler,
   getCaseStatusHandler,
   verifyIdentityStepupHandler,
