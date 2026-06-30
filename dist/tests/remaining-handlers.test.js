@@ -220,6 +220,30 @@ describe('Remaining Handler Tests', () => {
             expect(update.statusAvailable).toBe(false);
             expect(update.unavailableReason).toBe('No outage record or outage support case found for this account.');
         });
+        it('should get outage status by case_id', async () => {
+            await handlers.upsertOutageStatusHandler({
+                outage_event_id: 'OUTAGE-CASE-001',
+                premise_number: '60412233',
+                status: 'estimated_restoration',
+                cause: 'weather',
+                estimated_restoration_at: '2026-06-30T03:00:00Z',
+                affected_customers: 50
+            });
+            const report = await handlers.reportOutageHandler({
+                account_number: '5210099001',
+                description: 'Case id outage status test'
+            });
+            const result = await handlers.getOutageStatusHandler({
+                case_id: report.supportCase.caseId
+            });
+            expect(result.status).toBe('OK');
+            expect(result.outageStatusUpdates).toBeDefined();
+            expect(result.outageStatusUpdates.length).toBeGreaterThanOrEqual(1);
+            const update = result.outageStatusUpdates[0];
+            expect(update.accountNumber).toBe('5210099001');
+            expect(update.outageFound).toBe(true);
+            expect(update.supportCaseUpdate?.caseId).toBe(report.supportCase.caseId);
+        });
         it('should create service request status notifications through scheduled checks', async () => {
             await handlers.startStopTransferServiceHandler({
                 action: 'start',

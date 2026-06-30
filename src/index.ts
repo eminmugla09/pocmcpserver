@@ -1925,8 +1925,18 @@ const buildOutageStatusUpdate = async ({ customer_number, account_number }: any)
   return updates;
 };
 
-const getOutageStatusHandler = async ({ customer_number, account_number }: any) => {
-  const outageStatusUpdates = await buildOutageStatusUpdate({ customer_number, account_number });
+const getOutageStatusHandler = async ({ customer_number, account_number, case_id }: any) => {
+  let resolvedAccountNumber = account_number;
+  if (case_id) {
+    const caseResult = await pool.query(
+      `SELECT account_number FROM support_cases WHERE case_id = $1`,
+      [case_id]
+    );
+    if (caseResult.rows.length > 0 && !resolvedAccountNumber) {
+      resolvedAccountNumber = caseResult.rows[0].account_number;
+    }
+  }
+  const outageStatusUpdates = await buildOutageStatusUpdate({ customer_number, account_number: resolvedAccountNumber });
   return {
     status: "OK",
     outageStatusUpdates
@@ -2955,10 +2965,11 @@ server.registerTool(
 server.registerTool(
   "get_outage_status",
   {
-    description: "Get the current outage restoration status for a customer or account. Returns the latest outage status, estimated restoration time, actual restoration time, cause, and any recent outage support-case update. Use this for scheduled outage status checks (e.g., every hour) or customer-initiated outage status lookups. When the customer asks about an outage or a support case with category 'outage', use this tool instead of get_case_status. Safe to call repeatedly; it does not create support cases or notifications.",
+    description: "Get the current outage restoration status for a customer, account, or outage support case. Returns the latest outage status, estimated restoration time, actual restoration time, cause, and any recent outage support-case update. Use this for scheduled outage status checks (e.g., every hour) or customer-initiated outage status lookups. When the customer mentions an outage support case_id, use this tool instead of get_case_status. Safe to call repeatedly; it does not create support cases or notifications.",
     inputSchema: {
       customer_number: z.string().optional(),
-      account_number: z.string().optional()
+      account_number: z.string().optional(),
+      case_id: z.string().optional()
     }
   },
   async (input) => jsonContent(await getOutageStatusHandler(input))
@@ -2982,7 +2993,7 @@ server.registerTool(
 server.registerTool(
   "get_case_status",
   {
-    description: "Get support case status by case id. Use for non-outage cases. For outage status, including restoration estimate, outage cause, and any recent outage support-case update, use get_outage_status instead.",
+    description: "Get support case status by case id. Do NOT use for outage support cases (category = 'outage'). For outage status, including restoration estimate, outage cause, and any recent outage support-case update, use get_outage_status instead.",
     inputSchema: {
       case_id: z.string()
     }
