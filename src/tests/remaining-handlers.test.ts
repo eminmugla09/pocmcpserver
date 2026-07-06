@@ -361,6 +361,33 @@ describe('Remaining Handler Tests', () => {
       expect(update.statusAvailable).toBe(true);
     });
 
+    it('should update stale support case subject when upsert_outage_status finds an outage', async () => {
+      // Use account 5230099003 (premise 71412266) which has no prior outage events in this test run
+      // Report outage first with no outage event existing — creates "no matching outage found" case
+      const report = await handlers.reportOutageHandler({
+        account_number: '5230099003',
+        description: 'Stale subject test outage report'
+      });
+      expect(report.supportCase.subject).toContain('no matching outage found');
+
+      // Now upsert an outage event — should update the stale support case subject
+      await handlers.upsertOutageStatusHandler({
+        outage_event_id: 'OUTAGE-STALE-SUBJECT-001',
+        premise_number: '71412266',
+        status: 'active',
+        cause: 'under investigation',
+        estimated_restoration_at: '2026-07-01T15:00:00Z',
+        affected_customers: 1
+      });
+
+      // Verify the support case subject was updated
+      const caseStatus = await handlers.getCaseStatusHandler({
+        case_id: report.supportCase.caseId
+      });
+      expect(caseStatus.subject).not.toContain('no matching outage found');
+      expect(caseStatus.subject).toContain('known outage found');
+    });
+
     it('should report outage and include known restoration estimate when an outage exists', async () => {
       await handlers.upsertOutageStatusHandler({
         outage_event_id: 'OUTAGE-TEST-REPORT-001',
