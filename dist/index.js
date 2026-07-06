@@ -1762,7 +1762,7 @@ const getCaseStatusHandler = async ({ case_id }) => {
         return { found: false, message: "Case not found." };
     }
     const supportCase = result.rows[0];
-    return {
+    const response = {
         caseId: supportCase.case_id,
         accountNumber: supportCase.account_number,
         category: supportCase.category,
@@ -1773,6 +1773,33 @@ const getCaseStatusHandler = async ({ case_id }) => {
         createdAt: supportCase.created_at,
         updatedAt: supportCase.updated_at
     };
+    // Defensive: when the case is an outage case, also look up the outage event
+    // so the caller gets outage status fields even if they called get_case_status
+    // instead of get_outage_status. ChatGPT sometimes picks get_case_status when
+    // a case_id is mentioned, so we include outage info here to avoid missing it.
+    if (supportCase.category?.toLowerCase() === "outage") {
+        const accountResult = await pool.query(`SELECT premise_number FROM accounts WHERE account_number = $1`, [supportCase.account_number]);
+        const premiseNumber = accountResult.rows[0]?.premise_number;
+        let outage = null;
+        if (premiseNumber) {
+            const outageResult = await pool.query(`SELECT * FROM outage_events WHERE premise_number = $1 ORDER BY updated_at DESC LIMIT 1`, [premiseNumber]);
+            outage = outageResult.rows[0] || null;
+        }
+        response.outageStatus = {
+            outageFound: Boolean(outage),
+            outageStatus: outage?.status || null,
+            estimatedRestorationAt: outage?.estimated_restoration_at || null,
+            actualRestorationAt: outage?.actual_restoration_at || null,
+            outageCause: outage?.cause || null,
+            outageEventId: outage?.outage_event_id || null,
+            powerRestored: outage?.status?.toLowerCase() === "restored",
+            statusAvailable: Boolean(outage),
+            unavailableReason: outage ? null : "No outage event record found for this account's premise, though an outage support case exists."
+        };
+        response.recommendedTool = "get_outage_status";
+        response.recommendationNote = "This is an outage support case. For future outage status checks, call get_outage_status with account_number or case_id instead of get_case_status.";
+    }
+    return response;
 };
 const verifyIdentityStepupHandler = async ({ customer_number, method }) => {
     const sessionId = makeId("STEPUP");
@@ -2224,7 +2251,7 @@ const createFplMcpServer = () => {
         }
     }, async (input) => jsonContent(await reportOutageHandler(input)));
     server.registerTool("get_outage_status", {
-        description: "Use this tool when the customer asks about outage status, restoration estimate, whether power is restored, or mentions an outage support case. It returns the latest outage status, estimated restoration time, actual restoration time, cause, and any recent outage support-case update. It accepts account_number, customer_number, or case_id. Do NOT use get_case_status for outage-related questions; use this tool instead. Safe to call repeatedly; it does not create support cases or notifications.",
+        description: "Use this tool when the customer asks about outage status, restoration estimate, whether power is restored, or mentions an outage support case. It returns the latest outage status, estimated restoration time, actual restoration time, cause, and any recent outage support-case update. It accepts account_number, customer_number, or case_id. When the customer mentions a support case ID together with outage-related keywords (outage, power, restoration, restored), use THIS tool with case_id, not get_case_status. Do NOT use get_case_status for outage-related questions; use this tool instead. Safe to call repeatedly; it does not create support cases or notifications.",
         inputSchema: {
             customer_number: z.string().optional(),
             account_number: z.string().optional(),
@@ -2242,7 +2269,7 @@ const createFplMcpServer = () => {
         }
     }, async (input) => jsonContent(await createSupportCaseHandler(input)));
     server.registerTool("get_case_status", {
-        description: "Get support case status by case id. Only use when the customer asks about a support case and does NOT mention outage status, restoration estimate, power restored, or an outage support case. Do NOT use for outage support cases (category = 'outage'); for outage status, use get_outage_status instead.",
+        description: "Get support case status by case id. Only use when the customer asks about a support case and does NOT mention outage status, restoration estimate, power restored, or an outage support case. Do NOT use for outage support cases (category = 'outage'); for outage status, use get_outage_status instead. If called for an outage case, the response will include outage status fields and a recommendation to use get_outage_status for future checks.",
         inputSchema: {
             case_id: z.string()
         }

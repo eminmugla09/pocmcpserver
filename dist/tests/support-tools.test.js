@@ -78,4 +78,51 @@ describe('Support Tools', () => {
         expect(result).toBeDefined();
         expect(result.found).toBe(false);
     });
+    it('should include outage status fields when get_case_status is called on an outage case', async () => {
+        // Create an outage event for the premise
+        await handlers.upsertOutageStatusHandler({
+            outage_event_id: 'OUTAGE-CASE-STATUS-001',
+            premise_number: '60412233',
+            status: 'active',
+            cause: 'under investigation',
+            estimated_restoration_at: '2026-07-01T15:00:00Z',
+            affected_customers: 1
+        });
+        // Report an outage to create an outage support case
+        const report = await handlers.reportOutageHandler({
+            account_number: '5210099001',
+            description: 'Outage case status test'
+        });
+        const outageCaseId = report.supportCase.caseId;
+        // Call get_case_status (the "wrong" tool) on the outage case
+        const result = await handlers.getCaseStatusHandler({
+            case_id: outageCaseId
+        });
+        expect(result).toBeDefined();
+        expect(result.caseId).toBe(outageCaseId);
+        expect(result.category).toBe('outage');
+        // Should include outage status fields defensively
+        expect(result.outageStatus).toBeDefined();
+        expect(result.outageStatus.outageFound).toBe(true);
+        expect(result.outageStatus.outageStatus).toBe('active');
+        expect(result.outageStatus.estimatedRestorationAt).toBeDefined();
+        expect(result.outageStatus.powerRestored).toBe(false);
+        expect(result.recommendedTool).toBe('get_outage_status');
+    });
+    it('should not include outage status fields for non-outage cases', async () => {
+        const createResult = await handlers.createSupportCaseHandler({
+            account_number: '5210099001',
+            category: 'Billing',
+            subject: 'Billing question',
+            description: 'Question about charges',
+            priority: 'normal'
+        });
+        const result = await handlers.getCaseStatusHandler({
+            case_id: createResult.caseId
+        });
+        expect(result).toBeDefined();
+        expect(result.category).toBe('Billing');
+        expect(result.outageStatus).toBeUndefined();
+        expect(result.recommendedTool).toBeUndefined();
+    });
 });
