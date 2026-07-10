@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FPL Rate Plan Comparison</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+  *, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  :root {
+    --fpl-primary: #00a6d6;
+    --fpl-secondary: #005b96;
+    --fpl-green: #27ae60;
+    --fpl-green-light: #e8f8ef;
+    --fpl-gray-50: #f9fafb;
+    --fpl-gray-100: #f3f4f6;
+    --fpl-gray-200: #e5e7eb;
+    --fpl-gray-300: #d1d5db;
+    --fpl-gray-500: #6b7280;
+    --fpl-gray-700: #374151;
+    --fpl-gray-900: #111827;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+    --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.07), 0 2px 4px -2px rgba(0,0,0,0.05);
+    --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.08), 0 4px 6px -4px rgba(0,0,0,0.04);
+    --radius: 12px;
+    --radius-sm: 8px;
+  }
+
+  body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--fpl-gray-50);
+    color: var(--fpl-gray-900);
+    line-height: 1.5;
+    padding: 16px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .widget-container {
+    max-width: 720px;
+    margin: 0 auto;
+  }
+
+  /* Loading State */
+  .loading-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 300px;
+    gap: 16px;
+  }
+
+  .loading-spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid var(--fpl-gray-200);
+    border-top-color: var(--fpl-primary);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .loading-text {
+    color: var(--fpl-gray-500);
+    font-size: 14px;
+  }
+
+  .loading-skeleton {
+    background: linear-gradient(90deg, var(--fpl-gray-100) 25%, var(--fpl-gray-200) 50%, var(--fpl-gray-100) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: var(--radius-sm);
+  }
+
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* Header */
+  .header-card {
+    background: linear-gradient(135deg, var(--fpl-secondary) 0%, var(--fpl-primary) 100%);
+    color: #fff;
+    border-radius: var(--radius);
+    padding: 24px;
+    margin-bottom: 20px;
+    box-shadow: var(--shadow-md);
+  }
+
+  .header-label {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    opacity: 0.85;
+    margin-bottom: 4px;
+    font-weight: 600;
+  }
+
+  .header-plan-name {
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+
+  .header-amount {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+  }
+
+  .header-amount-value {
+    font-size: 36px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+  }
+
+  .header-amount-period {
+    font-size: 14px;
+    opacity: 0.8;
+  }
+
+  /* Chart Section */
+  .chart-card {
+    background: #fff;
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--fpl-gray-200);
+  }
+
+  .chart-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--fpl-gray-700);
+    margin-bottom: 16px;
+  }
+
+  .chart-wrapper {
+    position: relative;
+    width: 100%;
+  }
+
+  /* Plan Cards Grid */
+  .cards-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  @media (min-width: 520px) {
+    .cards-grid {
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+  }
+
+  .plan-card {
+    background: #fff;
+    border-radius: var(--radius);
+    padding: 20px;
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--fpl-gray-200);
+    position: relative;
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+  }
+
+  .plan-card:hover {
+    box-shadow: var(--shadow-lg);
+    transform: translateY(-1px);
+  }
+
+  .plan-card.recommended {
+    border-color: var(--fpl-green);
+    border-width: 2px;
+    box-shadow: var(--shadow-md), 0 0 0 1px var(--fpl-green);
+  }
+
+  .recommended-badge {
+    position: absolute;
+    top: -11px;
+    right: 16px;
+    background: var(--fpl-green);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 3px 10px;
+    border-radius: 20px;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .plan-card-name {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--fpl-gray-900);
+    margin-bottom: 12px;
+  }
+
+  .plan-card-cost {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    margin-bottom: 10px;
+  }
+
+  .plan-card-cost-value {
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--fpl-secondary);
+    letter-spacing: -0.02em;
+  }
+
+  .plan-card-cost-period {
+    font-size: 13px;
+    color: var(--fpl-gray-500);
+  }
+
+  .savings-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+
+  .savings-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--fpl-green-light);
+    color: var(--fpl-green);
+    font-size: 12px;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 20px;
+  }
+
+  .savings-badge.neutral {
+    background: var(--fpl-gray-100);
+    color: var(--fpl-gray-500);
+  }
+
+  .savings-badge svg {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+  }
+
+  .plan-card-best-for {
+    font-size: 13px;
+    color: var(--fpl-gray-500);
+    line-height: 1.4;
+    border-top: 1px solid var(--fpl-gray-100);
+    padding-top: 10px;
+  }
+
+  .plan-card-best-for strong {
+    color: var(--fpl-gray-700);
+    font-weight: 600;
+  }
+
+  /* Hidden */
+  .hidden {
+    display: none !important;
+  }
+</style>
+</head>
+<body>
+<div class="widget-container">
+  <!-- Loading State -->
+  <div id="loading-state" class="loading-container">
+    <div class="loading-spinner"></div>
+    <div class="loading-text">Loading rate plan comparison...</div>
+  </div>
+
+  <!-- Content (hidden until data arrives) -->
+  <div id="content-state" class="hidden">
+    <div class="header-card" id="header-card">
+      <div class="header-label">Your Current Plan</div>
+      <div class="header-plan-name" id="header-plan-name"></div>
+      <div class="header-amount">
+        <span class="header-amount-value" id="header-amount-value"></span>
+        <span class="header-amount-period">/month avg</span>
+      </div>
+    </div>
+
+    <div class="chart-card">
+      <div class="chart-title">Monthly Cost Comparison</div>
+      <div class="chart-wrapper">
+        <canvas id="comparison-chart"></canvas>
+      </div>
+    </div>
+
+    <div class="cards-grid" id="cards-grid"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ─── Formatting helpers ───────────────────────────────────────────
+  const fmt = (n) => '$' + Number(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+
+  const arrowDownSVG =
+    '<svg viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+    '<path d="M6 2v8m0 0L2.5 6.5M6 10l3.5-3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
+    '</svg>';
+
+  // ─── Render ───────────────────────────────────────────────────────
+  let chartInstance = null;
+
+  function render(data) {
+    if (!data || !data.comparisons) return;
+
+    document.getElementById('loading-state').classList.add('hidden');
+    document.getElementById('content-state').classList.remove('hidden');
+
+    // Header
+    document.getElementById('header-plan-name').textContent = data.current_plan;
+    document.getElementById('header-amount-value').textContent = fmt(data.current_monthly_avg);
+
+    // Determine the recommended plan (highest monthly_savings > 0)
+    let bestIdx = -1;
+    let bestSavings = 0;
+    data.comparisons.forEach((c, i) => {
+      if (c.monthly_savings > bestSavings) {
+        bestSavings = c.monthly_savings;
+        bestIdx = i;
+      }
+    });
+
+    // Build chart
+    renderChart(data, bestIdx);
+
+    // Build cards
+    renderCards(data, bestIdx);
+  }
+
+  function renderChart(data, bestIdx) {
+    const ctx = document.getElementById('comparison-chart').getContext('2d');
+
+    // Labels and data: current plan + comparisons
+    const labels = [data.current_plan, ...data.comparisons.map((c) => c.plan_name)];
+    const values = [data.current_monthly_avg, ...data.comparisons.map((c) => c.estimated_monthly)];
+
+    // Colors
+    const colors = labels.map((_, i) => {
+      if (i === 0) return '#005b96'; // current plan
+      if (i - 1 === bestIdx) return '#27ae60'; // recommended
+      return '#00a6d6'; // other
+    });
+
+    const barCount = labels.length;
+    const barHeight = 36;
+    const gap = 12;
+    const chartHeight = barCount * (barHeight + gap) + 20;
+    const canvas = document.getElementById('comparison-chart');
+    canvas.style.height = chartHeight + 'px';
+
+    if (chartInstance) chartInstance.destroy();
+
+    chartInstance = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [{
+          data: values,
+          backgroundColor: colors,
+          borderRadius: 6,
+          barPercentage: 0.7,
+          categoryPercentage: 0.85
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: '#1f2937',
+            titleFont: { family: 'system-ui', size: 13, weight: '600' },
+            bodyFont: { family: 'system-ui', size: 13 },
+            padding: 10,
+            cornerRadius: 8,
+            callbacks: {
+              label: function (ctx) {
+                return fmt(ctx.parsed.x) + '/mo';
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            beginAtZero: true,
+            grid: { color: '#f3f4f6' },
+            ticks: {
+              font: { family: 'system-ui', size: 12 },
+              color: '#6b7280',
+              callback: function (v) { return '$' + v; }
+            }
+          },
+          y: {
+            grid: { display: false },
+            ticks: {
+              font: { family: 'system-ui', size: 13, weight: '600' },
+              color: '#374151'
+            }
+          }
+        }
+      }
+    });
+  }
+
+  function renderCards(data, bestIdx) {
+    const grid = document.getElementById('cards-grid');
+    grid.innerHTML = '';
+
+    data.comparisons.forEach((plan, i) => {
+      const isRecommended = i === bestIdx;
+      const hasSavings = plan.monthly_savings > 0;
+
+      const card = document.createElement('div');
+      card.className = 'plan-card' + (isRecommended ? ' recommended' : '');
+
+      let html = '';
+
+      if (isRecommended) {
+        html += '<div class="recommended-badge">Recommended</div>';
+      }
+
+      html += '<div class="plan-card-name">' + escHtml(plan.plan_name) + '</div>';
+      html += '<div class="plan-card-cost">';
+      html += '  <span class="plan-card-cost-value">' + fmt(plan.estimated_monthly) + '</span>';
+      html += '  <span class="plan-card-cost-period">/month</span>';
+      html += '</div>';
+
+      html += '<div class="savings-row">';
+      if (hasSavings) {
+        html += '<span class="savings-badge">' + arrowDownSVG + fmt(plan.monthly_savings) + '/mo</span>';
+        html += '<span class="savings-badge">' + arrowDownSVG + fmt(plan.annual_savings) + '/yr</span>';
+      } else {
+        html += '<span class="savings-badge neutral">No savings vs current</span>';
+      }
+      html += '</div>';
+
+      html += '<div class="plan-card-best-for"><strong>Best for:</strong> ' + escHtml(plan.best_for) + '</div>';
+
+      card.innerHTML = html;
+      grid.appendChild(card);
+    });
+  }
+
+  function escHtml(str) {
+    var el = document.createElement('span');
+    el.textContent = str;
+    return el.innerHTML;
+  }
+
+  // ─── MCP Apps Bridge ─────────────────────────────────────────────
+  let rpcId = 0;
+
+  function sendRpc(method, params) {
+    var msg = {
+      jsonrpc: '2.0',
+      method: method,
+      params: params || {}
+    };
+    if (!method.startsWith('ui/notifications/')) {
+      msg.id = ++rpcId;
+    }
+    window.parent.postMessage(msg, '*');
+  }
+
+  function handleToolResult(payload) {
+    if (!payload) return;
+
+    // The structured content can arrive in different shapes
+    var data = null;
+
+    if (payload.structuredContent) {
+      data = payload.structuredContent;
+    } else if (payload.content) {
+      // Could be wrapped in content array
+      if (Array.isArray(payload.content)) {
+        for (var i = 0; i < payload.content.length; i++) {
+          var item = payload.content[i];
+          if (item.type === 'text' && typeof item.text === 'string') {
+            try { data = JSON.parse(item.text); } catch (e) { /* ignore */ }
+            if (data) break;
+          }
+          if (item.json) {
+            data = item.json;
+            break;
+          }
+        }
+      } else if (typeof payload.content === 'object') {
+        data = payload.content;
+      }
+    } else if (payload.current_plan) {
+      // Top-level data
+      data = payload;
+    }
+
+    if (data) render(data);
+  }
+
+  // Listen for postMessage responses
+  window.addEventListener('message', function (event) {
+    var msg = event.data;
+    if (!msg || typeof msg !== 'object') return;
+
+    // JSON-RPC notification with tool result
+    if (msg.method === 'ui/notifications/tool-result') {
+      handleToolResult(msg.params);
+      return;
+    }
+
+    // JSON-RPC response to our initialize call
+    if (msg.id && msg.result) {
+      // After receiving init response, send initialized notification
+      sendRpc('ui/notifications/initialized', {});
+    }
+  });
+
+  // Initialize on load
+  function init() {
+    // Send initialize request
+    sendRpc('ui/initialize', {
+      appInfo: {
+        name: 'fpl-rate-comparison',
+        title: 'FPL Rate Plan Comparison',
+        description: 'Side-by-side comparison of FPL rate plans'
+      },
+      appCapabilities: {
+        toolResults: true,
+        structuredContent: true
+      },
+      protocolVersion: '2026-01-26'
+    });
+
+    // Fallback: check window.openai.toolOutput
+    setTimeout(function () {
+      if (window.openai && window.openai.toolOutput) {
+        var output = window.openai.toolOutput;
+        var parsed = null;
+        if (typeof output === 'string') {
+          try { parsed = JSON.parse(output); } catch (e) { /* ignore */ }
+        } else if (typeof output === 'object') {
+          parsed = output;
+        }
+        if (parsed) handleToolResult(parsed);
+      }
+    }, 500);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+</body>
+</html>

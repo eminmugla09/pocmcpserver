@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FPL Account Overview</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+  :root{
+    --fpl-primary:#00a6d6;
+    --fpl-secondary:#005b96;
+    --fpl-accent:#f7941d;
+    --fpl-bg:#f4f6f9;
+    --fpl-card:#ffffff;
+    --fpl-text:#1e293b;
+    --fpl-muted:#64748b;
+    --fpl-border:#e2e8f0;
+    --fpl-green:#27ae60;
+    --fpl-green-bg:#dcfce7;
+    --fpl-red:#e74c3c;
+    --fpl-red-bg:#fee2e2;
+    --fpl-blue:#3b82f6;
+    --fpl-blue-bg:#dbeafe;
+    --fpl-amber:#f59e0b;
+    --fpl-amber-bg:#fef3c7;
+    --radius:12px;
+    --shadow:0 1px 3px rgba(0,0,0,.08),0 4px 14px rgba(0,0,0,.06);
+  }
+
+  html{font-size:15px}
+  body{
+    font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Oxygen,Ubuntu,Cantarell,sans-serif;
+    background:var(--fpl-bg);
+    color:var(--fpl-text);
+    line-height:1.5;
+    padding:16px;
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* ── Loading State ───────────────────────── */
+  #loading{
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:16px;min-height:320px;
+  }
+  .spinner{
+    width:44px;height:44px;
+    border:4px solid var(--fpl-border);
+    border-top-color:var(--fpl-primary);
+    border-radius:50%;
+    animation:spin .8s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .loading-text{color:var(--fpl-muted);font-size:.95rem}
+
+  /* ── Dashboard (hidden until data) ───────── */
+  #dashboard{display:none;max-width:720px;margin:0 auto}
+
+  /* ── Cards ───────────────────────────────── */
+  .card{
+    background:var(--fpl-card);
+    border-radius:var(--radius);
+    box-shadow:var(--shadow);
+    padding:24px;
+    margin-bottom:16px;
+  }
+  .card-title{
+    font-size:.8rem;font-weight:600;letter-spacing:.04em;
+    text-transform:uppercase;color:var(--fpl-muted);margin-bottom:12px;
+  }
+
+  /* ── Header Card ─────────────────────────── */
+  .header-top{
+    display:flex;flex-wrap:wrap;align-items:flex-start;
+    justify-content:space-between;gap:12px;
+  }
+  .customer-name{
+    font-size:1.6rem;font-weight:700;
+    background:linear-gradient(135deg,var(--fpl-secondary),var(--fpl-primary));
+    -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+    background-clip:text;
+    line-height:1.2;
+  }
+  .account-number{
+    font-size:.85rem;color:var(--fpl-muted);margin-top:2px;
+    font-weight:500;
+  }
+  .account-number span{
+    font-family:'SF Mono',SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;
+    color:var(--fpl-text);font-weight:600;letter-spacing:.03em;
+  }
+  .badges{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .badge{
+    display:inline-flex;align-items:center;gap:5px;
+    padding:5px 12px;border-radius:20px;
+    font-weight:700;font-size:.78rem;letter-spacing:.02em;
+    text-transform:uppercase;
+  }
+  .badge .dot{
+    width:7px;height:7px;border-radius:50%;background:currentColor;
+    animation:pulse-dot 1.6s ease-in-out infinite;
+  }
+  @keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.35}}
+
+  .badge-green{background:var(--fpl-green-bg);color:var(--fpl-green)}
+  .badge-red{background:var(--fpl-red-bg);color:var(--fpl-red)}
+  .badge-amber{background:var(--fpl-amber-bg);color:var(--fpl-amber)}
+
+  .service-address{
+    margin-top:16px;padding-top:16px;border-top:1px solid var(--fpl-border);
+    display:flex;align-items:flex-start;gap:10px;
+  }
+  .address-icon{
+    flex-shrink:0;width:36px;height:36px;border-radius:8px;
+    background:linear-gradient(135deg,var(--fpl-primary),var(--fpl-secondary));
+    display:flex;align-items:center;justify-content:center;
+    color:#fff;
+  }
+  .address-icon svg{width:18px;height:18px;fill:currentColor}
+  .address-label{font-size:.72rem;color:var(--fpl-muted);text-transform:uppercase;letter-spacing:.04em;font-weight:600}
+  .address-value{font-size:.95rem;font-weight:600;color:var(--fpl-text);margin-top:1px}
+  .rate-plan{font-size:.8rem;color:var(--fpl-muted);margin-top:2px}
+
+  /* ── Billing Card ────────────────────────── */
+  .billing-grid{
+    display:grid;grid-template-columns:1fr 1fr;gap:20px;
+    align-items:start;
+  }
+  .bill-amount-block{text-align:center}
+  .bill-amount{
+    font-size:2.6rem;font-weight:800;
+    background:linear-gradient(135deg,var(--fpl-secondary),var(--fpl-primary));
+    -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+    background-clip:text;
+    line-height:1.1;
+  }
+  .bill-label{
+    font-size:.75rem;color:var(--fpl-muted);text-transform:uppercase;
+    letter-spacing:.04em;font-weight:600;margin-top:4px;
+  }
+  .due-badge{
+    display:inline-flex;align-items:center;gap:6px;
+    background:linear-gradient(135deg,var(--fpl-accent),#fbbf24);
+    color:#fff;font-weight:700;font-size:.8rem;
+    padding:6px 14px;border-radius:20px;
+    box-shadow:0 2px 8px rgba(247,148,29,.35);
+    margin-top:10px;
+  }
+  .due-badge svg{width:14px;height:14px;fill:currentColor}
+
+  .billing-details{display:flex;flex-direction:column;gap:14px}
+  .billing-detail-item{
+    display:flex;flex-direction:column;gap:2px;
+  }
+  .billing-detail-label{
+    font-size:.72rem;color:var(--fpl-muted);text-transform:uppercase;
+    letter-spacing:.04em;font-weight:600;
+  }
+  .billing-detail-value{font-size:.95rem;font-weight:600;color:var(--fpl-text)}
+  .billing-detail-sub{font-size:.82rem;color:var(--fpl-muted)}
+
+  /* ── Features Row ────────────────────────── */
+  .features-grid{
+    display:flex;flex-wrap:wrap;gap:10px;
+  }
+  .feature-chip{
+    display:inline-flex;align-items:center;gap:6px;
+    padding:8px 14px;border-radius:10px;
+    font-size:.82rem;font-weight:600;
+    border:1px solid var(--fpl-border);
+    background:var(--fpl-bg);
+    transition:transform .15s ease;
+  }
+  .feature-chip:hover{transform:translateY(-1px)}
+  .feature-chip.on{
+    background:var(--fpl-green-bg);border-color:rgba(39,174,96,.25);
+    color:#166534;
+  }
+  .feature-chip.off{
+    background:#f8fafc;border-color:var(--fpl-border);
+    color:var(--fpl-muted);
+  }
+  .feature-dot{
+    width:8px;height:8px;border-radius:50%;flex-shrink:0;
+  }
+  .feature-dot.on{background:var(--fpl-green)}
+  .feature-dot.off{background:#cbd5e1}
+  .feature-plan{
+    font-size:.72rem;color:var(--fpl-muted);font-weight:500;
+    margin-left:2px;
+  }
+
+  /* ── Alerts ──────────────────────────────── */
+  .alerts-list{display:flex;flex-direction:column;gap:10px}
+  .alert-item{
+    display:flex;align-items:flex-start;gap:10px;
+    padding:12px 16px;border-radius:10px;
+    font-size:.88rem;font-weight:500;line-height:1.4;
+  }
+  .alert-icon{
+    flex-shrink:0;width:22px;height:22px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    font-size:.75rem;font-weight:800;
+  }
+  .alert-info{
+    background:var(--fpl-blue-bg);color:#1e40af;
+    border:1px solid rgba(59,130,246,.2);
+  }
+  .alert-info .alert-icon{background:var(--fpl-blue);color:#fff}
+  .alert-warning{
+    background:var(--fpl-amber-bg);color:#92400e;
+    border:1px solid rgba(245,158,11,.25);
+  }
+  .alert-warning .alert-icon{background:var(--fpl-amber);color:#fff}
+  .alert-error{
+    background:var(--fpl-red-bg);color:#991b1b;
+    border:1px solid rgba(231,76,60,.2);
+  }
+  .alert-error .alert-icon{background:var(--fpl-red);color:#fff}
+
+  /* ── Responsive ──────────────────────────── */
+  @media(max-width:520px){
+    body{padding:10px}
+    .card{padding:18px}
+    .customer-name{font-size:1.3rem}
+    .billing-grid{grid-template-columns:1fr;gap:16px}
+    .bill-amount-block{text-align:left}
+    .bill-amount{font-size:2rem}
+    .feature-chip{font-size:.78rem;padding:6px 10px}
+  }
+</style>
+</head>
+<body>
+
+<!-- Loading State -->
+<div id="loading">
+  <div class="spinner"></div>
+  <div class="loading-text">Loading account overview&hellip;</div>
+</div>
+
+<!-- Dashboard (shown after data arrives) -->
+<div id="dashboard">
+
+  <!-- ── Header Card ── -->
+  <div class="card" id="header-card">
+    <div class="header-top">
+      <div>
+        <div class="customer-name" id="customer-name"></div>
+        <div class="account-number">Account #<span id="account-number"></span></div>
+      </div>
+      <div class="badges" id="status-badges"></div>
+    </div>
+    <div class="service-address">
+      <div class="address-icon">
+        <svg viewBox="0 0 20 20"><path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z"/></svg>
+      </div>
+      <div>
+        <div class="address-label">Service Address</div>
+        <div class="address-value" id="service-address"></div>
+        <div class="rate-plan" id="rate-plan"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Billing Card ── -->
+  <div class="card">
+    <div class="card-title">Current Billing</div>
+    <div class="billing-grid">
+      <div class="bill-amount-block">
+        <div class="bill-amount" id="current-bill"></div>
+        <div class="bill-label">Amount Due</div>
+        <div>
+          <span class="due-badge">
+            <svg viewBox="0 0 20 20"><path d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 011 1v3a1 1 0 11-2 0V8a1 1 0 011-1zm4 0a1 1 0 011 1v3a1 1 0 11-2 0V8a1 1 0 011-1z"/></svg>
+            Due <span id="due-date"></span>
+          </span>
+        </div>
+      </div>
+      <div class="billing-details">
+        <div class="billing-detail-item">
+          <span class="billing-detail-label">Last Payment</span>
+          <span class="billing-detail-value" id="last-payment-amount"></span>
+          <span class="billing-detail-sub" id="last-payment-date"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Features Card ── -->
+  <div class="card">
+    <div class="card-title">Account Features</div>
+    <div class="features-grid" id="features-grid"></div>
+  </div>
+
+  <!-- ── Alerts Card (hidden if no alerts) ── -->
+  <div class="card" id="alerts-card" style="display:none">
+    <div class="card-title">Alerts &amp; Notifications</div>
+    <div class="alerts-list" id="alerts-list"></div>
+  </div>
+
+</div><!-- /dashboard -->
+
+<script>
+/* ──────────────────────────────────────────────
+   MCP Apps Bridge + Rendering
+   ────────────────────────────────────────────── */
+(function () {
+  'use strict';
+
+  var PROTOCOL_VERSION = '2026-01-26';
+  var rpcId = 0;
+  var initialized = false;
+
+  // ── Helpers ──────────────────────────────────
+  function sendRpc(method, params) {
+    var msg = {
+      jsonrpc: '2.0',
+      id: ++rpcId,
+      method: method
+    };
+    if (params) msg.params = params;
+    window.parent.postMessage(msg, '*');
+    return msg.id;
+  }
+
+  function sendNotification(method, params) {
+    var msg = {
+      jsonrpc: '2.0',
+      method: method
+    };
+    if (params) msg.params = params;
+    window.parent.postMessage(msg, '*');
+  }
+
+  function fmt(n) {
+    return '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function fmtDate(iso) {
+    var d = new Date(iso + 'T00:00:00');
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  // ── Render Dashboard ────────────────────────
+  function render(data) {
+    if (!data || !data.customer_name) return;
+
+    // Header
+    document.getElementById('customer-name').textContent = data.customer_name;
+    document.getElementById('account-number').textContent = data.account_number || '—';
+
+    // Status & Standing Badges
+    var badgesEl = document.getElementById('status-badges');
+    badgesEl.innerHTML = '';
+
+    if (data.account_status) {
+      var statusClass = data.account_status.toLowerCase() === 'active' ? 'badge-green' : 'badge-amber';
+      badgesEl.innerHTML += '<span class="badge ' + statusClass + '"><span class="dot"></span>' + escHtml(data.account_status) + '</span>';
+    }
+
+    if (data.account_standing) {
+      var standingLower = data.account_standing.toLowerCase();
+      var standingClass = 'badge-green';
+      if (standingLower === 'past due' || standingLower === 'pastdue' || standingLower === 'past-due') {
+        standingClass = 'badge-red';
+      } else if (standingLower !== 'good') {
+        standingClass = 'badge-amber';
+      }
+      badgesEl.innerHTML += '<span class="badge ' + standingClass + '"><span class="dot"></span>' + escHtml(data.account_standing) + '</span>';
+    }
+
+    // Service Address
+    document.getElementById('service-address').textContent = data.service_address || '—';
+    document.getElementById('rate-plan').textContent = data.rate_plan ? 'Rate Plan: ' + data.rate_plan : '';
+
+    // Billing
+    document.getElementById('current-bill').textContent = data.current_bill != null ? fmt(data.current_bill) : '—';
+    document.getElementById('due-date').textContent = data.due_date ? fmtDate(data.due_date) : '—';
+
+    if (data.last_payment) {
+      document.getElementById('last-payment-amount').textContent = data.last_payment.amount != null ? fmt(data.last_payment.amount) : '—';
+      document.getElementById('last-payment-date').textContent = data.last_payment.date ? 'Paid ' + fmtDate(data.last_payment.date) : '';
+    } else {
+      document.getElementById('last-payment-amount').textContent = '—';
+      document.getElementById('last-payment-date').textContent = 'No recent payment';
+    }
+
+    // Features
+    var featuresEl = document.getElementById('features-grid');
+    featuresEl.innerHTML = '';
+
+    var features = [
+      { key: 'autopay_enabled', label: 'AutoPay', onText: 'On', offText: 'Off' },
+      { key: 'paperless_billing', label: 'Paperless', onText: 'On', offText: 'Off' },
+      { key: 'smart_meter', label: 'Smart Meter', onText: 'Yes', offText: 'No' },
+      { key: 'ev_enrolled', label: 'EV Enrolled', onText: 'Yes', offText: 'No' }
+    ];
+
+    features.forEach(function (f) {
+      var isOn = !!data[f.key];
+      var chip = document.createElement('div');
+      chip.className = 'feature-chip ' + (isOn ? 'on' : 'off');
+
+      var html = '<span class="feature-dot ' + (isOn ? 'on' : 'off') + '"></span>' +
+        escHtml(f.label) + ': ' + (isOn ? f.onText : f.offText);
+
+      // Show EV plan name if enrolled
+      if (f.key === 'ev_enrolled' && isOn && data.ev_plan) {
+        html += '<span class="feature-plan">(' + escHtml(data.ev_plan) + ')</span>';
+      }
+
+      chip.innerHTML = html;
+      featuresEl.appendChild(chip);
+    });
+
+    // Alerts
+    var alerts = data.alerts || [];
+    var alertsCard = document.getElementById('alerts-card');
+    var alertsList = document.getElementById('alerts-list');
+
+    if (alerts.length > 0) {
+      alertsCard.style.display = 'block';
+      alertsList.innerHTML = '';
+
+      var alertIcons = {
+        info: 'i',
+        warning: '!',
+        error: '✕'
+      };
+
+      alerts.forEach(function (alert) {
+        var type = alert.type || 'info';
+        var cls = 'alert-' + type;
+        var icon = alertIcons[type] || 'i';
+
+        var item = document.createElement('div');
+        item.className = 'alert-item ' + cls;
+        item.innerHTML = '<div class="alert-icon">' + icon + '</div>' +
+          '<div>' + escHtml(alert.message) + '</div>';
+        alertsList.appendChild(item);
+      });
+    } else {
+      alertsCard.style.display = 'none';
+    }
+
+    // Show dashboard, hide loading
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('dashboard').style.display = 'block';
+  }
+
+  function escHtml(str) {
+    var div = document.createElement('div');
+    div.appendChild(document.createTextNode(str));
+    return div.innerHTML;
+  }
+
+  // ── MCP Apps Bridge ─────────────────────────
+  function handleMessage(event) {
+    var msg = event.data;
+    if (!msg || typeof msg !== 'object' || msg.jsonrpc !== '2.0') return;
+
+    // Response to our ui/initialize
+    if (msg.id && msg.result && !initialized) {
+      initialized = true;
+      sendNotification('ui/notifications/initialized');
+    }
+
+    // Tool result notification
+    if (msg.method === 'ui/notifications/tool-result') {
+      var params = msg.params || {};
+      var content = params.structuredContent || params.content;
+      if (content) {
+        var parsed = typeof content === 'string' ? JSON.parse(content) : content;
+        render(parsed);
+      }
+    }
+  }
+
+  window.addEventListener('message', handleMessage);
+
+  // ── Initialization ──────────────────────────
+  function init() {
+    // 1. Check window.openai.toolOutput fallback first
+    if (window.openai && window.openai.toolOutput) {
+      try {
+        var fallback = typeof window.openai.toolOutput === 'string'
+          ? JSON.parse(window.openai.toolOutput)
+          : window.openai.toolOutput;
+        render(fallback);
+        return;
+      } catch (e) {
+        // Ignore parse errors, continue with bridge
+      }
+    }
+
+    // 2. Send ui/initialize over the bridge
+    sendRpc('ui/initialize', {
+      appInfo: {
+        name: 'FPL Account Overview',
+        description: 'Account overview dashboard for FPL utility customers',
+        version: '1.0.0'
+      },
+      appCapabilities: {
+        toolResults: true
+      },
+      protocolVersion: PROTOCOL_VERSION
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+</body>
+</html>

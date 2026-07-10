@@ -1,12 +1,18 @@
 import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import { z } from "zod";
 import pg from "pg";
 import { verifyToken, getUserCustomerNumbers, hasCustomerAccess } from "./auth.js";
 import { runMigration } from "../migrate-db.js";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 const { Pool } = pg;
 const getDatabaseUrl = () => {
     const rawUrl = process.env.DATABASE_URL ?? "";
@@ -51,6 +57,7 @@ const findMatchingCustomers = async (filters) => {
     return customers.filter((customer) => matchesCustomerFilters(customer, filters));
 };
 const jsonContent = (payload) => ({
+    structuredContent: payload,
     content: [
         {
             type: "text",
@@ -270,8 +277,11 @@ const getBillingInquiryHandler = async ({ account_number }) => {
     const billing = result.rows[0];
     if (!billing)
         return { found: false };
-    // Get charges for this bill
-    const chargesResult = await pool.query('SELECT * FROM bill_charges WHERE billing_id = $1', [billing.id]);
+    // Get charges and payment history in parallel
+    const [chargesResult, paymentsResult] = await Promise.all([
+        pool.query('SELECT * FROM bill_charges WHERE billing_id = $1', [billing.id]),
+        pool.query('SELECT * FROM payment_history WHERE account_number = $1 ORDER BY payment_date DESC LIMIT 5', [account_number])
+    ]);
     return {
         invoiceId: billing.invoice_id,
         billDate: billing.bill_date,
@@ -287,7 +297,11 @@ const getBillingInquiryHandler = async ({ account_number }) => {
         evChargingKwh: billing.ev_charging_kwh,
         evOffPeakKwh: billing.ev_off_peak_kwh,
         evOnPeakKwh: billing.ev_on_peak_kwh,
-        estimatedEvOffPeakSavingsUsd: billing.estimated_ev_off_peak_savings_usd
+        estimatedEvOffPeakSavingsUsd: billing.estimated_ev_off_peak_savings_usd,
+        recentPayments: paymentsResult.rows,
+        autopayEnrolled: billing.autopay_enrolled || false,
+        nextScheduledPaymentDate: billing.next_scheduled_payment_date,
+        nextScheduledPaymentAmountUsd: billing.next_scheduled_payment_amount_usd
     };
 };
 const getPaymentHistoryHandler = async ({ account_number }) => {
@@ -1844,6 +1858,22 @@ const auditActivityLogHandler = async ({ account_number, customer_number, limit 
         ...(row.details || {})
     }));
 };
+// Load widget HTML templates
+const loadWidget = (name) => {
+    try {
+        return readFileSync(join(__dirname, "widgets", name), "utf8");
+    }
+    catch {
+        return `<html><body><p>Widget ${name} not found.</p></body></html>`;
+    }
+};
+const usageChartHtml = loadWidget("usage-chart.html");
+const billingDashboardHtml = loadWidget("billing-dashboard.html");
+const highBillExplanationHtml = loadWidget("high-bill-explanation.html");
+const rateComparisonHtml = loadWidget("rate-comparison.html");
+const outageStatusHtml = loadWidget("outage-status.html");
+const evChargingChartHtml = loadWidget("ev-charging-chart.html");
+const accountOverviewHtml = loadWidget("account-overview.html");
 const createFplMcpServer = () => {
     const server = new McpServer({
         name: "fpl-agent-mcp",
@@ -1853,7 +1883,8 @@ const createFplMcpServer = () => {
             tools: {
                 listChanged: true
             }
-        }
+        },
+        instructions: "This server exposes FPL utility tools. Data tools return structured JSON. Render tools display interactive widgets in ChatGPT. When a customer asks about usage, billing, rates, outages, or EV charging, first call the data tool to get the data, then call the corresponding render tool to display an interactive chart or dashboard."
     });
     server.registerTool("get_customer_profile", {
         description: "Identify the customer and return linked accounts, premises and registered EVs.",
@@ -1920,7 +1951,7 @@ const createFplMcpServer = () => {
         };
     });
     server.registerTool("get_billing_inquiry", {
-        description: "Return current bill, due date, charge breakdown, kWh usage and EV off-peak savings.",
+        description: "Return current bill, due date, charge breakdown, kWh usage, EV off-peak savings, recent payments (last 5), and AutoPay status. This is the single tool for all billing and payment questions.",
         inputSchema: {
             account_number: z.string()
         }
@@ -2300,6 +2331,323 @@ const createFplMcpServer = () => {
             limit: z.number().int().min(1).max(100).optional()
         }
     }, async (input) => jsonContent(await auditActivityLogHandler(input)));
+    // ─── MCP Apps: Widget Resources ─────────────────────────────────────────────
+    registerAppResource(server, "usage-chart", "ui://widget/usage-chart.html", {}, async () => ({
+        contents: [{
+                uri: "ui://widget/usage-chart.html",
+                mimeType: RESOURCE_MIME_TYPE,
+                text: usageChartHtml,
+                _meta: { ui: { prefersBorder: true, csp: { resourceDomains: ["https://cdn.jsdelivr.net"] } } }
+            }]
+    }));
+    registerAppResource(server, "billing-dashboard", "ui://widget/billing-dashboard.html", {}, async () => ({
+        contents: [{
+                uri: "ui://widget/billing-dashboard.html",
+                mimeType: RESOURCE_MIME_TYPE,
+                text: billingDashboardHtml,
+                _meta: { ui: { prefersBorder: true, csp: { resourceDomains: ["https://cdn.jsdelivr.net"] } } }
+            }]
+    }));
+    registerAppResource(server, "high-bill-explanation", "ui://widget/high-bill-explanation.html", {}, async () => ({
+        contents: [{
+                uri: "ui://widget/high-bill-explanation.html",
+                mimeType: RESOURCE_MIME_TYPE,
+                text: highBillExplanationHtml,
+                _meta: { ui: { prefersBorder: true, csp: { resourceDomains: ["https://cdn.jsdelivr.net"] } } }
+            }]
+    }));
+    registerAppResource(server, "rate-comparison", "ui://widget/rate-comparison.html", {}, async () => ({
+        contents: [{
+                uri: "ui://widget/rate-comparison.html",
+                mimeType: RESOURCE_MIME_TYPE,
+                text: rateComparisonHtml,
+                _meta: { ui: { prefersBorder: true, csp: { resourceDomains: ["https://cdn.jsdelivr.net"] } } }
+            }]
+    }));
+    registerAppResource(server, "outage-status", "ui://widget/outage-status.html", {}, async () => ({
+        contents: [{
+                uri: "ui://widget/outage-status.html",
+                mimeType: RESOURCE_MIME_TYPE,
+                text: outageStatusHtml,
+                _meta: { ui: { prefersBorder: true } }
+            }]
+    }));
+    registerAppResource(server, "ev-charging-chart", "ui://widget/ev-charging-chart.html", {}, async () => ({
+        contents: [{
+                uri: "ui://widget/ev-charging-chart.html",
+                mimeType: RESOURCE_MIME_TYPE,
+                text: evChargingChartHtml,
+                _meta: { ui: { prefersBorder: true, csp: { resourceDomains: ["https://cdn.jsdelivr.net"] } } }
+            }]
+    }));
+    registerAppResource(server, "account-overview", "ui://widget/account-overview.html", {}, async () => ({
+        contents: [{
+                uri: "ui://widget/account-overview.html",
+                mimeType: RESOURCE_MIME_TYPE,
+                text: accountOverviewHtml,
+                _meta: { ui: { prefersBorder: true } }
+            }]
+    }));
+    // ─── MCP Apps: Render Tools ─────────────────────────────────────────────────
+    registerAppTool(server, "render_usage_chart", {
+        title: "Render Usage Chart",
+        description: "Render an interactive usage history chart widget. First call get_usage_history to get the data, then pass it here to display a visual chart. The model should call get_usage_history first, then call this tool with the usage data.",
+        inputSchema: {
+            months: z.array(z.string()).describe("Month labels, e.g. ['Jan 2026','Feb 2026']"),
+            kwh: z.array(z.number()).describe("kWh usage per month"),
+            cost: z.array(z.number()).describe("Cost in dollars per month"),
+            ev_kwh: z.array(z.number()).optional().describe("EV charging kWh per month, if applicable")
+        },
+        outputSchema: {
+            months: z.array(z.string()),
+            kwh: z.array(z.number()),
+            cost: z.array(z.number()),
+            ev_kwh: z.array(z.number()).optional()
+        },
+        annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+        _meta: {
+            ui: { resourceUri: "ui://widget/usage-chart.html" },
+            "openai/outputTemplate": "ui://widget/usage-chart.html",
+            "openai/toolInvocation/invoking": "Building usage chart...",
+            "openai/toolInvocation/invoked": "Usage chart ready."
+        }
+    }, async (args) => ({
+        structuredContent: { months: args.months, kwh: args.kwh, cost: args.cost, ev_kwh: args.ev_kwh },
+        content: [{ type: "text", text: `Showing usage chart for ${args.months.length} months.` }]
+    }));
+    registerAppTool(server, "render_billing_dashboard", {
+        title: "Render Billing Dashboard",
+        description: "Render an interactive billing dashboard widget with bill breakdown and payment history. First call get_billing_inquiry (which includes recent payments and AutoPay status), then pass the data here.",
+        inputSchema: {
+            current_bill: z.object({
+                total: z.number(),
+                due_date: z.string(),
+                billing_period: z.string(),
+                kwh_used: z.number(),
+                charges: z.array(z.object({ name: z.string(), amount: z.number() }))
+            }),
+            payments: z.array(z.object({ date: z.string(), amount: z.number(), method: z.string() })),
+            autopay: z.object({
+                enabled: z.boolean(),
+                next_date: z.string().optional(),
+                next_amount: z.number().optional()
+            }).optional()
+        },
+        outputSchema: {
+            current_bill: z.object({ total: z.number(), due_date: z.string(), billing_period: z.string(), kwh_used: z.number(), charges: z.array(z.object({ name: z.string(), amount: z.number() })) }),
+            payments: z.array(z.object({ date: z.string(), amount: z.number(), method: z.string() })),
+            autopay: z.object({ enabled: z.boolean(), next_date: z.string().optional(), next_amount: z.number().optional() }).optional()
+        },
+        annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+        _meta: {
+            ui: { resourceUri: "ui://widget/billing-dashboard.html" },
+            "openai/outputTemplate": "ui://widget/billing-dashboard.html",
+            "openai/toolInvocation/invoking": "Building billing dashboard...",
+            "openai/toolInvocation/invoked": "Billing dashboard ready."
+        }
+    }, async (args) => ({
+        structuredContent: args,
+        content: [{ type: "text", text: `Showing billing dashboard. Current bill: $${args.current_bill.total}, due ${args.current_bill.due_date}.` }]
+    }));
+    registerAppTool(server, "render_high_bill_explanation", {
+        title: "Render High Bill Explanation",
+        description: "Render an interactive high bill explanation widget showing why the customer's bill increased. First call get_billing_inquiry and get_usage_history, then pass the comparison data here. Use when customer asks 'why is my bill so high' or 'why did my bill increase'.",
+        inputSchema: {
+            current_month: z.string(),
+            current_bill: z.number(),
+            previous_bill: z.number(),
+            bill_increase_pct: z.number(),
+            current_kwh: z.number(),
+            previous_kwh: z.number(),
+            kwh_increase_pct: z.number(),
+            monthly_comparison: z.array(z.object({ month: z.string(), bill: z.number(), kwh: z.number() })),
+            charge_breakdown: z.array(z.object({ name: z.string(), current: z.number(), previous: z.number() })),
+            contributing_factors: z.array(z.object({ factor: z.string(), detail: z.string(), impact: z.string() })),
+            savings_tip: z.string().optional()
+        },
+        outputSchema: {
+            current_month: z.string(),
+            current_bill: z.number(),
+            previous_bill: z.number(),
+            bill_increase_pct: z.number(),
+            current_kwh: z.number(),
+            previous_kwh: z.number(),
+            kwh_increase_pct: z.number(),
+            monthly_comparison: z.array(z.object({ month: z.string(), bill: z.number(), kwh: z.number() })),
+            charge_breakdown: z.array(z.object({ name: z.string(), current: z.number(), previous: z.number() })),
+            contributing_factors: z.array(z.object({ factor: z.string(), detail: z.string(), impact: z.string() })),
+            savings_tip: z.string().optional()
+        },
+        annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+        _meta: {
+            ui: { resourceUri: "ui://widget/high-bill-explanation.html" },
+            "openai/outputTemplate": "ui://widget/high-bill-explanation.html",
+            "openai/toolInvocation/invoking": "Analyzing your bill...",
+            "openai/toolInvocation/invoked": "Bill analysis ready."
+        }
+    }, async (args) => ({
+        structuredContent: args,
+        content: [{ type: "text", text: `Bill analysis: ${args.current_month} bill is $${args.current_bill} (${args.bill_increase_pct > 0 ? '+' : ''}${args.bill_increase_pct}% vs previous).` }]
+    }));
+    registerAppTool(server, "render_rate_comparison", {
+        title: "Render Rate Plan Comparison",
+        description: "Render an interactive rate plan comparison widget showing potential savings. First call compare_rate_plan_savings or get_rate_plan_options, then pass the comparison data here.",
+        inputSchema: {
+            current_plan: z.string(),
+            current_monthly_avg: z.number(),
+            comparisons: z.array(z.object({
+                plan_name: z.string(),
+                estimated_monthly: z.number(),
+                monthly_savings: z.number(),
+                annual_savings: z.number(),
+                best_for: z.string()
+            }))
+        },
+        outputSchema: {
+            current_plan: z.string(),
+            current_monthly_avg: z.number(),
+            comparisons: z.array(z.object({ plan_name: z.string(), estimated_monthly: z.number(), monthly_savings: z.number(), annual_savings: z.number(), best_for: z.string() }))
+        },
+        annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+        _meta: {
+            ui: { resourceUri: "ui://widget/rate-comparison.html" },
+            "openai/outputTemplate": "ui://widget/rate-comparison.html",
+            "openai/toolInvocation/invoking": "Comparing rate plans...",
+            "openai/toolInvocation/invoked": "Rate comparison ready."
+        }
+    }, async (args) => ({
+        structuredContent: args,
+        content: [{ type: "text", text: `Rate comparison: Current plan ${args.current_plan} at $${args.current_monthly_avg}/mo. ${args.comparisons.length} alternatives analyzed.` }]
+    }));
+    registerAppTool(server, "render_outage_status", {
+        title: "Render Outage Status",
+        description: "Render an outage status widget showing current outage details, restoration estimate, and timeline. First call get_outage_status or report_outage, then pass the outage data here.",
+        inputSchema: {
+            status: z.string().describe("ACTIVE, RESTORED, or REPORTED"),
+            cause: z.string().optional(),
+            reported_at: z.string().optional(),
+            estimated_restoration_at: z.string().optional(),
+            actual_restoration_at: z.string().optional(),
+            affected_customers: z.number().optional(),
+            service_address: z.string().optional(),
+            case_id: z.string().optional(),
+            crew_status: z.string().optional(),
+            timeline: z.array(z.object({ time: z.string(), event: z.string() })).optional()
+        },
+        outputSchema: {
+            status: z.string(),
+            cause: z.string().optional(),
+            reported_at: z.string().optional(),
+            estimated_restoration_at: z.string().optional(),
+            actual_restoration_at: z.string().optional(),
+            affected_customers: z.number().optional(),
+            service_address: z.string().optional(),
+            case_id: z.string().optional(),
+            crew_status: z.string().optional(),
+            timeline: z.array(z.object({ time: z.string(), event: z.string() })).optional()
+        },
+        annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+        _meta: {
+            ui: { resourceUri: "ui://widget/outage-status.html" },
+            "openai/outputTemplate": "ui://widget/outage-status.html",
+            "openai/toolInvocation/invoking": "Loading outage status...",
+            "openai/toolInvocation/invoked": "Outage status loaded."
+        }
+    }, async (args) => ({
+        structuredContent: args,
+        content: [{ type: "text", text: `Outage status: ${args.status}${args.estimated_restoration_at ? `, ETA: ${args.estimated_restoration_at}` : ''}.` }]
+    }));
+    registerAppTool(server, "render_ev_charging_chart", {
+        title: "Render EV Charging Chart",
+        description: "Render an interactive EV charging session history chart. First call get_ev_charging_sessions, then pass the data here.",
+        inputSchema: {
+            vehicle: z.string().optional(),
+            charger: z.string().optional(),
+            plan: z.string().optional(),
+            monthly_charge: z.number().optional(),
+            sessions: z.array(z.object({
+                date: z.string(),
+                kwh: z.number(),
+                duration_hours: z.number(),
+                off_peak_pct: z.number(),
+                cost_savings: z.number()
+            })).optional(),
+            monthly_summary: z.array(z.object({
+                month: z.string(),
+                total_kwh: z.number(),
+                off_peak_pct: z.number(),
+                savings: z.number()
+            })).optional(),
+            total_savings_ytd: z.number().optional()
+        },
+        outputSchema: {
+            vehicle: z.string().optional(),
+            charger: z.string().optional(),
+            plan: z.string().optional(),
+            monthly_charge: z.number().optional(),
+            sessions: z.array(z.object({ date: z.string(), kwh: z.number(), duration_hours: z.number(), off_peak_pct: z.number(), cost_savings: z.number() })).optional(),
+            monthly_summary: z.array(z.object({ month: z.string(), total_kwh: z.number(), off_peak_pct: z.number(), savings: z.number() })).optional(),
+            total_savings_ytd: z.number().optional()
+        },
+        annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+        _meta: {
+            ui: { resourceUri: "ui://widget/ev-charging-chart.html" },
+            "openai/outputTemplate": "ui://widget/ev-charging-chart.html",
+            "openai/toolInvocation/invoking": "Building EV charging chart...",
+            "openai/toolInvocation/invoked": "EV charging chart ready."
+        }
+    }, async (args) => ({
+        structuredContent: args,
+        content: [{ type: "text", text: `Showing EV charging data${args.vehicle ? ` for ${args.vehicle}` : ''}.${args.total_savings_ytd ? ` YTD savings: $${args.total_savings_ytd}` : ''}` }]
+    }));
+    registerAppTool(server, "render_account_overview", {
+        title: "Render Account Overview",
+        description: "Render an account overview dashboard widget. First call get_my_account_overview, then pass the account data here.",
+        inputSchema: {
+            customer_name: z.string(),
+            account_number: z.string(),
+            account_status: z.string(),
+            account_standing: z.string(),
+            service_address: z.string().optional(),
+            rate_plan: z.string().optional(),
+            current_bill: z.number().optional(),
+            due_date: z.string().optional(),
+            last_payment: z.object({ date: z.string(), amount: z.number() }).optional(),
+            autopay_enabled: z.boolean().optional(),
+            paperless_billing: z.boolean().optional(),
+            smart_meter: z.boolean().optional(),
+            ev_enrolled: z.boolean().optional(),
+            ev_plan: z.string().optional(),
+            alerts: z.array(z.object({ type: z.string(), message: z.string() })).optional()
+        },
+        outputSchema: {
+            customer_name: z.string(),
+            account_number: z.string(),
+            account_status: z.string(),
+            account_standing: z.string(),
+            service_address: z.string().optional(),
+            rate_plan: z.string().optional(),
+            current_bill: z.number().optional(),
+            due_date: z.string().optional(),
+            last_payment: z.object({ date: z.string(), amount: z.number() }).optional(),
+            autopay_enabled: z.boolean().optional(),
+            paperless_billing: z.boolean().optional(),
+            smart_meter: z.boolean().optional(),
+            ev_enrolled: z.boolean().optional(),
+            ev_plan: z.string().optional(),
+            alerts: z.array(z.object({ type: z.string(), message: z.string() })).optional()
+        },
+        annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+        _meta: {
+            ui: { resourceUri: "ui://widget/account-overview.html" },
+            "openai/outputTemplate": "ui://widget/account-overview.html",
+            "openai/toolInvocation/invoking": "Loading account overview...",
+            "openai/toolInvocation/invoked": "Account overview ready."
+        }
+    }, async (args) => ({
+        structuredContent: args,
+        content: [{ type: "text", text: `Account overview for ${args.customer_name} (${args.account_number}). Status: ${args.account_status}, Standing: ${args.account_standing}.` }]
+    }));
     return server;
 };
 const readRequestBody = async (request) => {
@@ -2319,8 +2667,8 @@ const readRequestBody = async (request) => {
 };
 const setCorsHeaders = (response) => {
     response.setHeader("Access-Control-Allow-Origin", "*");
-    response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    response.setHeader("Access-Control-Allow-Headers", "Content-Type, Mcp-Session-Id, mcp-session-id");
+    response.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+    response.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Mcp-Session-Id, mcp-session-id");
     response.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id, mcp-session-id");
 };
 const writeJson = (response, statusCode, payload) => {
@@ -2745,7 +3093,7 @@ const handleMcpRequest = async (request, response) => {
                 { name: "lookup_account", description: "Resolve a residential account by account_number, customer_number, phone, email, premise_number, or address. Use when you need to find an account that is not linked to the current authenticated user. Do NOT call this for the logged-in user's own account — use get_my_account_overview instead.", inputSchema: { type: "object", properties: { account_number: { type: "string" }, customer_number: { type: "string" }, phone: { type: "string" }, email: { type: "string" }, premise_number: { type: "string" }, address: { type: "string" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
                 { name: "get_account_summary", description: "Return account status, standing (Good/Past Due), rate class (e.g. RS-1, TOU-EV), smart meter flag, enrolled programs, and account flags for a specific account. Use when you need deeper account-level detail beyond what get_my_account_overview provides. account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
                 { name: "get_premise_details", description: "Return FPL service-location details for a service address or premise number. Includes property type, service_status, serviceActive (boolean), garage readiness (240V circuit, WiFi), EV suitability, active-service guidance, and concrete nextAction/instructions/customerOfferTemplate fields. When serviceActive is false, first congratulate the customer and offer to schedule electric service for the address and closing/move-in/renting date from the public records tool. Do not ask about existing active service in that first offer. If the customer says yes and activeServiceAddresses from get_my_account_overview includes another service address, then ask whether to keep that service active before calling schedule_move_in_service. If the customer says they are moving from that address, ask for the move-out/stop-service date before calling schedule_move_in_service. If no date is available, ask the customer for their preferred date. Ask for confirmation before calling schedule_move_in_service. Does NOT include public-record data (closing date, sale price, parcel ID, etc.) — get those from a public records tool. Use after resolving the address through a public records tool (e.g., for a home purchase) or direct customer input. For EV questions, call this and check_ev_eligibility together in sequence. Do not say 'premise' or show internal premise numbers to the customer.", inputSchema: { type: "object", properties: { premise_number: { type: "string" }, address: { type: "string" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
-                { name: "get_billing_inquiry", description: "Return detailed billing for a specific account: current bill amount, due date, billing period, kWh used, average daily cost, full charge-line breakdown (base, fuel, non-fuel, EVolution, taxes), and EV off-peak savings. Use when you need billing for a non-primary account or deeper detail than get_my_account_overview provides. account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "get_billing_inquiry", description: "Return detailed billing for a specific account: current bill amount, due date, billing period, kWh used, average daily cost, full charge-line breakdown (base, fuel, non-fuel, EVolution, taxes), EV off-peak savings, recent payments (last 5), and AutoPay status. This is the single tool for all billing and payment questions — no need to call get_payment_history separately. Use when you need billing for a non-primary account or deeper detail than get_my_account_overview provides. account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
                 { name: "get_payment_history", description: "Return recent payments (date, amount, method) and AutoPay status including next scheduled payment date and amount. Use for questions like 'did my payment go through', 'when is my next autopay', or 'show my payment history'. account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
                 { name: "get_usage_history", description: "Return month-by-month kWh usage, cost, and EV charging kWh going back up to 12 months. Use for questions about usage trends, seasonal comparisons, or 'why is my bill higher this month'. account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
                 { name: "get_ev_enrollment", description: "Return FPL EVolution Home EV charging enrollment details: charger ID, model, status (Active/Paused/Cancelled), install type (full/equipment_only), monthly charge, install date, and registered vehicles linked to this account. Use for questions about 'which car', 'my EV charger', 'EVolution Home plan', or EV charging setup.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
@@ -2794,7 +3142,14 @@ const handleMcpRequest = async (request, response) => {
                 { name: "create_support_case", description: "Open a support case for a billing dispute, service issue, EV installation problem, or other concern. Requires category, subject, and description. priority is 'low', 'normal', or 'high'. Returns a case_id for follow-up. account_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { account_number: { type: "string", description: "Optional. Auto-resolved from authenticated user if omitted." }, category: { type: "string" }, subject: { type: "string" }, description: { type: "string" }, priority: { type: "string", enum: ["low", "normal", "high"] } }, required: ["category", "subject", "description"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
                 { name: "get_case_status", description: "Get support case status by case id. Only use when the customer asks about a support case and does NOT mention outage status, restoration estimate, power restored, or an outage support case. Do NOT use for outage support cases (category = 'outage'); for outage status, use get_outage_status instead. If called for an outage case, the response will include outage status fields and a recommendation to use get_outage_status for future checks.", inputSchema: { type: "object", properties: { case_id: { type: "string" } }, required: ["case_id"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
                 { name: "verify_identity_stepup", description: "Initiate a step-up identity verification challenge for sensitive operations (e.g. billing changes, account transfers). Sends a code via sms or email. customer_number auto-resolved from login if omitted.", inputSchema: { type: "object", properties: { customer_number: { type: "string" }, method: { type: "string", enum: ["sms", "email"] } }, required: ["customer_number", "method"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
-                { name: "audit_activity_log", description: "Retrieve a chronological log of actions taken on an account or for a customer: payments, service orders, AutoPay changes, EV enrollment events, etc. Use for account history questions or to audit recent changes.", inputSchema: { type: "object", properties: { account_number: { type: "string" }, customer_number: { type: "string" }, limit: { type: "number" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } }
+                { name: "audit_activity_log", description: "Retrieve a chronological log of actions taken on an account or for a customer: payments, service orders, AutoPay changes, EV enrollment events, etc. Use for account history questions or to audit recent changes.", inputSchema: { type: "object", properties: { account_number: { type: "string" }, customer_number: { type: "string" }, limit: { type: "number" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" } },
+                { name: "render_usage_chart", description: "Render an interactive usage history chart widget. First call get_usage_history to get the data, then pass it here to display a visual chart.", inputSchema: { type: "object", properties: { months: { type: "array", items: { type: "string" } }, kwh: { type: "array", items: { type: "number" } }, cost: { type: "array", items: { type: "number" } }, ev_kwh: { type: "array", items: { type: "number" } } }, required: ["months", "kwh", "cost"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" }, annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false }, _meta: { ui: { resourceUri: "ui://widget/usage-chart.html" }, "openai/outputTemplate": "ui://widget/usage-chart.html", "openai/toolInvocation/invoking": "Building usage chart...", "openai/toolInvocation/invoked": "Usage chart ready." } },
+                { name: "render_billing_dashboard", description: "Render an interactive billing dashboard widget with bill breakdown and payment history. First call get_billing_inquiry (which includes recent payments and AutoPay status), then pass the data here.", inputSchema: { type: "object", properties: { current_bill: { type: "object", properties: { total: { type: "number" }, due_date: { type: "string" }, billing_period: { type: "string" }, kwh_used: { type: "number" }, charges: { type: "array", items: { type: "object", properties: { name: { type: "string" }, amount: { type: "number" } } } } } }, payments: { type: "array", items: { type: "object", properties: { date: { type: "string" }, amount: { type: "number" }, method: { type: "string" } } } }, autopay: { type: "object", properties: { enabled: { type: "boolean" }, next_date: { type: "string" }, next_amount: { type: "number" } } } }, required: ["current_bill", "payments"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" }, annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false }, _meta: { ui: { resourceUri: "ui://widget/billing-dashboard.html" }, "openai/outputTemplate": "ui://widget/billing-dashboard.html", "openai/toolInvocation/invoking": "Building billing dashboard...", "openai/toolInvocation/invoked": "Billing dashboard ready." } },
+                { name: "render_high_bill_explanation", description: "Render an interactive high bill explanation widget showing why the customer's bill increased. Use when customer asks 'why is my bill so high' or 'why did my bill increase'. First call get_billing_inquiry and get_usage_history, then pass the comparison data here.", inputSchema: { type: "object", properties: { current_month: { type: "string" }, current_bill: { type: "number" }, previous_bill: { type: "number" }, bill_increase_pct: { type: "number" }, current_kwh: { type: "number" }, previous_kwh: { type: "number" }, kwh_increase_pct: { type: "number" }, monthly_comparison: { type: "array", items: { type: "object", properties: { month: { type: "string" }, bill: { type: "number" }, kwh: { type: "number" } } } }, charge_breakdown: { type: "array", items: { type: "object", properties: { name: { type: "string" }, current: { type: "number" }, previous: { type: "number" } } } }, contributing_factors: { type: "array", items: { type: "object", properties: { factor: { type: "string" }, detail: { type: "string" }, impact: { type: "string" } } } }, savings_tip: { type: "string" } }, required: ["current_month", "current_bill", "previous_bill", "bill_increase_pct", "current_kwh", "previous_kwh", "kwh_increase_pct", "monthly_comparison", "charge_breakdown", "contributing_factors"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" }, annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false }, _meta: { ui: { resourceUri: "ui://widget/high-bill-explanation.html" }, "openai/outputTemplate": "ui://widget/high-bill-explanation.html", "openai/toolInvocation/invoking": "Analyzing your bill...", "openai/toolInvocation/invoked": "Bill analysis ready." } },
+                { name: "render_rate_comparison", description: "Render an interactive rate plan comparison widget showing potential savings. First call compare_rate_plan_savings or get_rate_plan_options, then pass the comparison data here.", inputSchema: { type: "object", properties: { current_plan: { type: "string" }, current_monthly_avg: { type: "number" }, comparisons: { type: "array", items: { type: "object", properties: { plan_name: { type: "string" }, estimated_monthly: { type: "number" }, monthly_savings: { type: "number" }, annual_savings: { type: "number" }, best_for: { type: "string" } } } } }, required: ["current_plan", "current_monthly_avg", "comparisons"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" }, annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false }, _meta: { ui: { resourceUri: "ui://widget/rate-comparison.html" }, "openai/outputTemplate": "ui://widget/rate-comparison.html", "openai/toolInvocation/invoking": "Comparing rate plans...", "openai/toolInvocation/invoked": "Rate comparison ready." } },
+                { name: "render_outage_status", description: "Render an outage status widget showing current outage details, restoration estimate, and timeline. First call get_outage_status or report_outage, then pass the outage data here.", inputSchema: { type: "object", properties: { status: { type: "string" }, cause: { type: "string" }, reported_at: { type: "string" }, estimated_restoration_at: { type: "string" }, actual_restoration_at: { type: "string" }, affected_customers: { type: "number" }, service_address: { type: "string" }, case_id: { type: "string" }, crew_status: { type: "string" }, timeline: { type: "array", items: { type: "object", properties: { time: { type: "string" }, event: { type: "string" } } } } }, required: ["status"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" }, annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false }, _meta: { ui: { resourceUri: "ui://widget/outage-status.html" }, "openai/outputTemplate": "ui://widget/outage-status.html", "openai/toolInvocation/invoking": "Loading outage status...", "openai/toolInvocation/invoked": "Outage status loaded." } },
+                { name: "render_ev_charging_chart", description: "Render an interactive EV charging session history chart. First call get_ev_charging_sessions, then pass the data here.", inputSchema: { type: "object", properties: { vehicle: { type: "string" }, charger: { type: "string" }, plan: { type: "string" }, monthly_charge: { type: "number" }, sessions: { type: "array", items: { type: "object", properties: { date: { type: "string" }, kwh: { type: "number" }, duration_hours: { type: "number" }, off_peak_pct: { type: "number" }, cost_savings: { type: "number" } } } }, monthly_summary: { type: "array", items: { type: "object", properties: { month: { type: "string" }, total_kwh: { type: "number" }, off_peak_pct: { type: "number" }, savings: { type: "number" } } } }, total_savings_ytd: { type: "number" } }, additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" }, annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false }, _meta: { ui: { resourceUri: "ui://widget/ev-charging-chart.html" }, "openai/outputTemplate": "ui://widget/ev-charging-chart.html", "openai/toolInvocation/invoking": "Building EV charging chart...", "openai/toolInvocation/invoked": "EV charging chart ready." } },
+                { name: "render_account_overview", description: "Render an account overview dashboard widget. First call get_my_account_overview, then pass the account data here.", inputSchema: { type: "object", properties: { customer_name: { type: "string" }, account_number: { type: "string" }, account_status: { type: "string" }, account_standing: { type: "string" }, service_address: { type: "string" }, rate_plan: { type: "string" }, current_bill: { type: "number" }, due_date: { type: "string" }, last_payment: { type: "object", properties: { date: { type: "string" }, amount: { type: "number" } } }, autopay_enabled: { type: "boolean" }, paperless_billing: { type: "boolean" }, smart_meter: { type: "boolean" }, ev_enrolled: { type: "boolean" }, ev_plan: { type: "string" }, alerts: { type: "array", items: { type: "object", properties: { type: { type: "string" }, message: { type: "string" } } } } }, required: ["customer_name", "account_number", "account_status", "account_standing"], additionalProperties: false, $schema: "http://json-schema.org/draft-07/schema#" }, annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false }, _meta: { ui: { resourceUri: "ui://widget/account-overview.html" }, "openai/outputTemplate": "ui://widget/account-overview.html", "openai/toolInvocation/invoking": "Loading account overview...", "openai/toolInvocation/invoked": "Account overview ready." } }
             ];
             const toolsResponse = {
                 jsonrpc: "2.0",
@@ -2830,7 +3185,8 @@ const handleMcpRequest = async (request, response) => {
     // Handle all other requests through transport
     const server = createFplMcpServer();
     const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: undefined
+        sessionIdGenerator: undefined,
+        enableJsonResponse: true
     });
     try {
         await server.connect(transport);

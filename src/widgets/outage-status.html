@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FPL Outage Status</title>
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --red: #e74c3c;
+      --red-light: #fdecea;
+      --green: #27ae60;
+      --green-light: #e8f8f0;
+      --amber: #f39c12;
+      --amber-light: #fef9e7;
+      --bg: #f4f6f8;
+      --card: #ffffff;
+      --text: #1a1a2e;
+      --text-muted: #6b7280;
+      --border: #e5e7eb;
+      --shadow: 0 2px 16px rgba(0, 0, 0, 0.08);
+      --radius: 14px;
+    }
+
+    html, body {
+      height: 100%;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      padding: 16px;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+    }
+
+    .widget {
+      width: 100%;
+      max-width: 640px;
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    /* ── Status Banner ───────────────────────────── */
+    .status-banner {
+      padding: 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .status-banner.active {
+      background: linear-gradient(135deg, var(--red), #c0392b);
+      color: #fff;
+    }
+
+    .status-banner.restored {
+      background: linear-gradient(135deg, var(--green), #1e8449);
+      color: #fff;
+    }
+
+    .status-dot-wrap {
+      position: relative;
+      width: 48px;
+      height: 48px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .status-dot {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #fff;
+      z-index: 1;
+    }
+
+    .active .status-dot-wrap::before {
+      content: '';
+      position: absolute;
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.25);
+      animation: pulse-ring 1.8s ease-out infinite;
+    }
+
+    .active .status-dot-wrap::after {
+      content: '';
+      position: absolute;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.15);
+      animation: pulse-ring 1.8s ease-out 0.4s infinite;
+    }
+
+    @keyframes pulse-ring {
+      0% { transform: scale(0.6); opacity: 1; }
+      100% { transform: scale(1.4); opacity: 0; }
+    }
+
+    .restored .status-dot-wrap::before {
+      content: '\2713';
+      position: absolute;
+      font-size: 28px;
+      font-weight: 700;
+      color: #fff;
+      z-index: 2;
+    }
+
+    .restored .status-dot {
+      background: rgba(255, 255, 255, 0.25);
+      width: 44px;
+      height: 44px;
+    }
+
+    .status-info h1 {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .status-info .cause {
+      font-size: 14px;
+      opacity: 0.9;
+      margin-bottom: 2px;
+    }
+
+    .status-info .address {
+      font-size: 13px;
+      opacity: 0.75;
+    }
+
+    /* ── ETA Section ──────────────────────────────── */
+    .eta-section {
+      padding: 24px;
+      text-align: center;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .eta-label {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+
+    .eta-time {
+      font-size: 36px;
+      font-weight: 800;
+      color: var(--text);
+      letter-spacing: -1px;
+    }
+
+    .eta-remaining {
+      display: inline-block;
+      margin-top: 8px;
+      padding: 6px 16px;
+      border-radius: 20px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .eta-remaining.urgent {
+      background: var(--red-light);
+      color: var(--red);
+    }
+
+    .eta-remaining.normal {
+      background: var(--amber-light);
+      color: var(--amber);
+    }
+
+    .eta-remaining.soon {
+      background: var(--green-light);
+      color: var(--green);
+    }
+
+    .eta-remaining.past {
+      background: var(--green-light);
+      color: var(--green);
+    }
+
+    /* ── Restored Banner ─────────────────────────── */
+    .restored-banner {
+      padding: 20px 24px;
+      background: var(--green-light);
+      border-bottom: 1px solid #c8e6c9;
+      text-align: center;
+    }
+
+    .restored-banner .restored-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--green);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    }
+
+    .restored-banner .restored-time {
+      font-size: 22px;
+      font-weight: 700;
+      color: #1a1a2e;
+    }
+
+    /* ── Info Cards ───────────────────────────────── */
+    .info-cards {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .info-card {
+      background: var(--bg);
+      border-radius: 10px;
+      padding: 16px 12px;
+      text-align: center;
+    }
+
+    .info-card .info-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+
+    .info-card .info-value {
+      font-size: 20px;
+      font-weight: 700;
+    }
+
+    .info-card .info-value.red { color: var(--red); }
+    .info-card .info-value.amber { color: var(--amber); }
+    .info-card .info-value.muted { color: var(--text); }
+
+    .info-card .info-sub {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    /* ── Timeline ────────────────────────────────── */
+    .timeline-section {
+      padding: 20px 24px 24px;
+    }
+
+    .timeline-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 16px;
+    }
+
+    .timeline {
+      position: relative;
+      padding-left: 28px;
+    }
+
+    .timeline::before {
+      content: '';
+      position: absolute;
+      left: 7px;
+      top: 6px;
+      bottom: 6px;
+      width: 2px;
+      background: var(--border);
+    }
+
+    .timeline-item {
+      position: relative;
+      padding-bottom: 20px;
+      display: flex;
+      align-items: flex-start;
+      gap: 0;
+      flex-direction: column;
+    }
+
+    .timeline-item:last-child {
+      padding-bottom: 0;
+    }
+
+    .timeline-item .dot {
+      position: absolute;
+      left: -28px;
+      top: 2px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--card);
+      border: 3px solid var(--green);
+      z-index: 1;
+    }
+
+    .timeline-item.future .dot {
+      border-color: var(--border);
+      border-style: dashed;
+    }
+
+    .timeline-item.active-event .dot {
+      border-color: var(--amber);
+      background: var(--amber);
+      box-shadow: 0 0 0 4px rgba(243, 156, 18, 0.2);
+    }
+
+    .timeline-item .event-text {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .timeline-item.future .event-text {
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    .timeline-item .event-time {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    /* ── Loading State ────────────────────────────── */
+    .loading-overlay {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 80px 24px;
+      gap: 16px;
+    }
+
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid var(--border);
+      border-top-color: var(--red);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .loading-overlay p {
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    /* ── Error State ──────────────────────────────── */
+    .error-message {
+      padding: 48px 24px;
+      text-align: center;
+      color: var(--red);
+      font-size: 14px;
+    }
+
+    /* ── Utilities ────────────────────────────────── */
+    .hidden { display: none !important; }
+
+    /* ── Responsive ───────────────────────────────── */
+    @media (max-width: 480px) {
+      body { padding: 8px; }
+      .status-banner { padding: 18px 16px; gap: 12px; }
+      .status-info h1 { font-size: 17px; }
+      .eta-section { padding: 18px 16px; }
+      .eta-time { font-size: 28px; }
+      .info-cards {
+        grid-template-columns: 1fr;
+        gap: 8px;
+        padding: 16px;
+      }
+      .info-card {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        text-align: left;
+        padding: 12px 16px;
+      }
+      .info-card .info-label { margin-bottom: 0; }
+      .info-card .info-value { font-size: 18px; }
+      .timeline-section { padding: 16px; }
+    }
+
+    @media (max-width: 360px) {
+      .status-dot-wrap { width: 36px; height: 36px; }
+      .active .status-dot-wrap::before { width: 36px; height: 36px; }
+      .active .status-dot-wrap::after { width: 26px; height: 26px; }
+      .status-dot { width: 16px; height: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="widget">
+
+    <!-- Loading State -->
+    <div id="loading" class="loading-overlay">
+      <div class="spinner"></div>
+      <p>Checking outage status&hellip;</p>
+    </div>
+
+    <!-- Data Content (hidden until data arrives) -->
+    <div id="content" class="hidden">
+      <!-- Status Banner -->
+      <div id="statusBanner" class="status-banner active">
+        <div class="status-dot-wrap">
+          <div class="status-dot"></div>
+        </div>
+        <div class="status-info">
+          <h1 id="statusText">Power Outage</h1>
+          <div class="cause" id="causeText"></div>
+          <div class="address" id="addressText"></div>
+        </div>
+      </div>
+
+      <!-- ETA Section (shown only for ACTIVE) -->
+      <div id="etaSection" class="eta-section">
+        <div class="eta-label">Estimated Restoration</div>
+        <div class="eta-time" id="etaTime"></div>
+        <div class="eta-remaining" id="etaRemaining"></div>
+      </div>
+
+      <!-- Restored Banner (shown only for RESTORED) -->
+      <div id="restoredBanner" class="restored-banner hidden">
+        <div class="restored-label">Power Restored</div>
+        <div class="restored-time" id="restoredTime"></div>
+      </div>
+
+      <!-- Info Cards -->
+      <div class="info-cards">
+        <div class="info-card">
+          <div class="info-label">Affected</div>
+          <div class="info-value red" id="affectedCount">—</div>
+          <div class="info-sub">customers</div>
+        </div>
+        <div class="info-card">
+          <div class="info-label">Case ID</div>
+          <div class="info-value muted" id="caseId" style="font-size:14px;">—</div>
+          <div class="info-sub">&nbsp;</div>
+        </div>
+        <div class="info-card">
+          <div class="info-label">Crew Status</div>
+          <div class="info-value amber" id="crewStatus">—</div>
+          <div class="info-sub">&nbsp;</div>
+        </div>
+      </div>
+
+      <!-- Timeline -->
+      <div class="timeline-section">
+        <div class="timeline-title">Event Timeline</div>
+        <div class="timeline" id="timeline"></div>
+      </div>
+    </div>
+
+    <!-- Error State -->
+    <div id="error" class="error-message hidden"></div>
+  </div>
+
+  <script>
+    /* ================================================================
+     *  MCP Apps Bridge — JSON-RPC over postMessage
+     * ================================================================ */
+    const PROTOCOL_VERSION = '2026-01-26';
+    let rpcId = 0;
+    let countdownInterval = null;
+
+    function sendRpc(method, params = {}) {
+      const message = {
+        jsonrpc: '2.0',
+        id: ++rpcId,
+        method,
+        params,
+      };
+      window.parent.postMessage(message, '*');
+    }
+
+    function sendNotification(method, params = {}) {
+      const message = {
+        jsonrpc: '2.0',
+        method,
+        params,
+      };
+      window.parent.postMessage(message, '*');
+    }
+
+    /* ── Initialise bridge ──────────────────────── */
+    function initBridge() {
+      sendRpc('ui/initialize', {
+        appInfo: {
+          name: 'fpl-outage-status',
+          title: 'FPL Outage Status',
+          version: '1.0.0',
+        },
+        appCapabilities: {
+          ui: true,
+          structuredContent: true,
+        },
+        protocolVersion: PROTOCOL_VERSION,
+      });
+
+      sendNotification('ui/notifications/initialized');
+    }
+
+    /* ── Listen for tool results ────────────────── */
+    window.addEventListener('message', (event) => {
+      try {
+        const msg = event.data;
+        if (!msg || typeof msg !== 'object') return;
+
+        // Handle JSON-RPC notification with tool result
+        if (msg.method === 'ui/notifications/tool-result') {
+          const content = msg.params?.structuredContent ?? msg.params?.result?.structuredContent;
+          if (content) renderData(content);
+          return;
+        }
+
+        // Handle JSON-RPC response (result to our request)
+        if (msg.result?.structuredContent) {
+          renderData(msg.result.structuredContent);
+          return;
+        }
+
+        // Handle direct data posts (non-RPC)
+        if (msg.status && msg.case_id) {
+          renderData(msg);
+        }
+      } catch (err) {
+        showError('Failed to process incoming data: ' + err.message);
+      }
+    });
+
+    /* ── Fallback: window.openai.toolOutput ──── */
+    function checkToolOutputFallback() {
+      try {
+        const output = window.openai?.toolOutput;
+        if (output) {
+          const data = typeof output === 'string' ? JSON.parse(output) : output;
+          if (data.status && data.case_id) {
+            renderData(data);
+            return true;
+          }
+        }
+      } catch (_) { /* ignore */ }
+      return false;
+    }
+
+    /* ================================================================
+     *  Rendering
+     * ================================================================ */
+
+    function renderData(data) {
+      try {
+        if (!data.status || !data.case_id) {
+          showError('Received incomplete outage data.');
+          return;
+        }
+
+        const isRestored = data.status === 'RESTORED';
+
+        // Status Banner
+        const banner = document.getElementById('statusBanner');
+        banner.className = 'status-banner ' + (isRestored ? 'restored' : 'active');
+
+        document.getElementById('statusText').textContent =
+          isRestored ? 'Power Restored' : 'Power Outage — Active';
+
+        document.getElementById('causeText').textContent =
+          data.cause ? 'Cause: ' + data.cause : '';
+
+        document.getElementById('addressText').textContent =
+          data.service_address || '';
+
+        // ETA Section
+        const etaSection = document.getElementById('etaSection');
+        const restoredBanner = document.getElementById('restoredBanner');
+
+        if (isRestored) {
+          etaSection.classList.add('hidden');
+          restoredBanner.classList.remove('hidden');
+          document.getElementById('restoredTime').textContent =
+            data.actual_restoration_at
+              ? formatDateTime(data.actual_restoration_at)
+              : 'Completed';
+        } else {
+          etaSection.classList.remove('hidden');
+          restoredBanner.classList.add('hidden');
+
+          if (data.estimated_restoration_at) {
+            document.getElementById('etaTime').textContent =
+              formatDateTime(data.estimated_restoration_at);
+            updateCountdown(data.estimated_restoration_at);
+            // Refresh countdown every minute
+            if (countdownInterval) clearInterval(countdownInterval);
+            countdownInterval = setInterval(
+              () => updateCountdown(data.estimated_restoration_at),
+              60000
+            );
+          } else {
+            document.getElementById('etaTime').textContent = 'Unknown';
+            document.getElementById('etaRemaining').textContent = 'No ETA available';
+            document.getElementById('etaRemaining').className = 'eta-remaining urgent';
+          }
+        }
+
+        // Info Cards
+        document.getElementById('affectedCount').textContent =
+          data.affected_customers != null
+            ? Number(data.affected_customers).toLocaleString('en-US')
+            : '—';
+
+        document.getElementById('caseId').textContent = data.case_id || '—';
+
+        const crewEl = document.getElementById('crewStatus');
+        crewEl.textContent = data.crew_status || '—';
+        if (isRestored) {
+          crewEl.className = 'info-value';
+          crewEl.style.color = 'var(--green)';
+          crewEl.textContent = 'Complete';
+        }
+
+        // Timeline
+        if (data.timeline && data.timeline.length) {
+          buildTimeline(data.timeline, isRestored);
+        }
+
+        document.getElementById('loading').classList.add('hidden');
+        document.getElementById('error').classList.add('hidden');
+        document.getElementById('content').classList.remove('hidden');
+      } catch (err) {
+        showError('Error rendering outage data: ' + err.message);
+      }
+    }
+
+    /* ── Countdown ───────────────────────────────── */
+    function updateCountdown(etaIso) {
+      const eta = new Date(etaIso);
+      const now = new Date();
+      const diffMs = eta - now;
+
+      const pill = document.getElementById('etaRemaining');
+
+      if (diffMs <= 0) {
+        pill.textContent = 'Overdue — restoration expected any moment';
+        pill.className = 'eta-remaining past';
+        return;
+      }
+
+      const totalMinutes = Math.floor(diffMs / 60000);
+      const hours = Math.floor(totalMinutes / 60);
+      const minutes = totalMinutes % 60;
+
+      let text;
+      if (hours > 0) {
+        text = hours + 'h ' + minutes + 'm remaining';
+      } else {
+        text = minutes + 'm remaining';
+      }
+      pill.textContent = text;
+
+      if (hours >= 4) {
+        pill.className = 'eta-remaining urgent';
+      } else if (hours >= 1) {
+        pill.className = 'eta-remaining normal';
+      } else {
+        pill.className = 'eta-remaining soon';
+      }
+    }
+
+    /* ── Timeline ────────────────────────────────── */
+    function buildTimeline(events, isRestored) {
+      const container = document.getElementById('timeline');
+      const now = new Date();
+
+      // Find the last past event index for the active indicator
+      let lastPastIdx = -1;
+      events.forEach((e, i) => {
+        if (new Date(e.time) <= now) lastPastIdx = i;
+      });
+
+      let html = '';
+      events.forEach((entry, idx) => {
+        const eventDate = new Date(entry.time);
+        const isFuture = eventDate > now && !isRestored;
+        const isActiveEvent = !isRestored && idx === lastPastIdx && isFuture === false;
+
+        let cls = 'timeline-item';
+        if (isFuture) cls += ' future';
+        if (isActiveEvent) cls += ' active-event';
+
+        html += '<div class="' + cls + '">';
+        html += '  <div class="dot"></div>';
+        html += '  <div class="event-text">' + escapeHtml(entry.event) + '</div>';
+        html += '  <div class="event-time">' + formatDateTime(entry.time) + '</div>';
+        html += '</div>';
+      });
+
+      container.innerHTML = html;
+    }
+
+    /* ── Helpers ──────────────────────────────────── */
+    function formatDateTime(isoString) {
+      const d = new Date(isoString);
+      return d.toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      });
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    function showError(msg) {
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('content').classList.add('hidden');
+      const el = document.getElementById('error');
+      el.textContent = msg;
+      el.classList.remove('hidden');
+    }
+
+    /* ================================================================
+     *  Boot
+     * ================================================================ */
+    document.addEventListener('DOMContentLoaded', () => {
+      // Try the OpenAI fallback first
+      if (checkToolOutputFallback()) return;
+
+      // Initialise the MCP Apps bridge
+      initBridge();
+
+      // If no data arrives in 15s, show an error
+      setTimeout(() => {
+        if (document.getElementById('loading').classList.contains('hidden')) return;
+        // One last fallback check
+        if (!checkToolOutputFallback()) {
+          showError('Timed out waiting for outage data. Please try again.');
+        }
+      }, 15000);
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FPL Usage Chart</title>
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --fpl-primary: #00a6d6;
+      --fpl-secondary: #005b96;
+      --fpl-accent: #f7941d;
+      --fpl-bg: #f4f6f8;
+      --fpl-card: #ffffff;
+      --fpl-text: #1a1a2e;
+      --fpl-text-muted: #6b7280;
+      --fpl-border: #e5e7eb;
+      --fpl-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+      --fpl-radius: 12px;
+    }
+
+    html, body {
+      height: 100%;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--fpl-bg);
+      color: var(--fpl-text);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      padding: 16px;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+    }
+
+    .widget {
+      width: 100%;
+      max-width: 720px;
+      background: var(--fpl-card);
+      border-radius: var(--fpl-radius);
+      box-shadow: var(--fpl-shadow);
+      overflow: hidden;
+    }
+
+    /* ── Header ─────────────────────────────────── */
+    .widget-header {
+      padding: 20px 24px 12px;
+      border-bottom: 1px solid var(--fpl-border);
+    }
+
+    .widget-header h1 {
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--fpl-secondary);
+      letter-spacing: -0.2px;
+    }
+
+    .widget-header p {
+      font-size: 13px;
+      color: var(--fpl-text-muted);
+      margin-top: 2px;
+    }
+
+    /* ── Summary Cards ──────────────────────────── */
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 12px;
+      padding: 16px 24px;
+    }
+
+    .summary-card {
+      background: var(--fpl-bg);
+      border-radius: 8px;
+      padding: 14px 16px;
+      text-align: center;
+    }
+
+    .summary-card .label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--fpl-text-muted);
+      margin-bottom: 4px;
+    }
+
+    .summary-card .value {
+      font-size: 22px;
+      font-weight: 700;
+    }
+
+    .summary-card .value.primary   { color: var(--fpl-primary); }
+    .summary-card .value.secondary { color: var(--fpl-secondary); }
+    .summary-card .value.accent    { color: var(--fpl-accent); }
+
+    .summary-card .unit {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--fpl-text-muted);
+    }
+
+    /* ── Chart Area ─────────────────────────────── */
+    .chart-wrap {
+      padding: 8px 24px 24px;
+      position: relative;
+    }
+
+    .chart-wrap canvas {
+      width: 100% !important;
+      max-height: 320px;
+    }
+
+    /* ── Loading State ──────────────────────────── */
+    .loading-overlay {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 64px 24px;
+      gap: 16px;
+    }
+
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid var(--fpl-border);
+      border-top-color: var(--fpl-primary);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .loading-overlay p {
+      font-size: 14px;
+      color: var(--fpl-text-muted);
+    }
+
+    /* ── Error State ────────────────────────────── */
+    .error-message {
+      padding: 32px 24px;
+      text-align: center;
+      color: #dc2626;
+      font-size: 14px;
+    }
+
+    /* ── Hidden utility ─────────────────────────── */
+    .hidden { display: none !important; }
+
+    /* ── Responsive tweaks ──────────────────────── */
+    @media (max-width: 400px) {
+      body { padding: 8px; }
+      .widget-header { padding: 16px 16px 10px; }
+      .summary { padding: 12px 16px; gap: 8px; }
+      .chart-wrap { padding: 8px 16px 16px; }
+      .summary-card .value { font-size: 18px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="widget">
+    <div class="widget-header">
+      <h1>Monthly Electricity Usage</h1>
+      <p>Usage (kWh) and cost ($) over time</p>
+    </div>
+
+    <!-- Loading State -->
+    <div id="loading" class="loading-overlay">
+      <div class="spinner"></div>
+      <p>Loading usage data&hellip;</p>
+    </div>
+
+    <!-- Data Content (hidden until data arrives) -->
+    <div id="content" class="hidden">
+      <div class="summary" id="summary"></div>
+      <div class="chart-wrap">
+        <canvas id="usageChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Error State -->
+    <div id="error" class="error-message hidden"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script>
+    /* ================================================================
+     *  MCP Apps Bridge — JSON-RPC over postMessage
+     * ================================================================ */
+    const PROTOCOL_VERSION = '2026-01-26';
+    let rpcId = 0;
+    let chart = null;
+
+    function sendRpc(method, params = {}) {
+      const message = {
+        jsonrpc: '2.0',
+        id: ++rpcId,
+        method,
+        params,
+      };
+      window.parent.postMessage(message, '*');
+    }
+
+    function sendNotification(method, params = {}) {
+      const message = {
+        jsonrpc: '2.0',
+        method,
+        params,
+      };
+      window.parent.postMessage(message, '*');
+    }
+
+    /* ── Initialise bridge ──────────────────────── */
+    function initBridge() {
+      sendRpc('ui/initialize', {
+        appInfo: {
+          name: 'fpl-usage-chart',
+          title: 'FPL Usage Chart',
+          version: '1.0.0',
+        },
+        appCapabilities: {
+          ui: true,
+          structuredContent: true,
+        },
+        protocolVersion: PROTOCOL_VERSION,
+      });
+
+      sendNotification('ui/notifications/initialized');
+    }
+
+    /* ── Listen for tool results ────────────────── */
+    window.addEventListener('message', (event) => {
+      try {
+        const msg = event.data;
+        if (!msg || typeof msg !== 'object') return;
+
+        // Handle JSON-RPC notification with tool result
+        if (msg.method === 'ui/notifications/tool-result') {
+          const content = msg.params?.structuredContent ?? msg.params?.result?.structuredContent;
+          if (content) renderData(content);
+          return;
+        }
+
+        // Handle JSON-RPC response (result to our request)
+        if (msg.result?.structuredContent) {
+          renderData(msg.result.structuredContent);
+          return;
+        }
+
+        // Handle direct data posts (non-RPC)
+        if (msg.months && msg.kwh && msg.cost) {
+          renderData(msg);
+        }
+      } catch (err) {
+        showError('Failed to process incoming data: ' + err.message);
+      }
+    });
+
+    /* ── Fallback: window.openai.toolOutput ──── */
+    function checkToolOutputFallback() {
+      try {
+        const output = window.openai?.toolOutput;
+        if (output) {
+          const data = typeof output === 'string' ? JSON.parse(output) : output;
+          if (data.months && data.kwh && data.cost) {
+            renderData(data);
+            return true;
+          }
+        }
+      } catch (_) { /* ignore */ }
+      return false;
+    }
+
+    /* ================================================================
+     *  Rendering
+     * ================================================================ */
+
+    function renderData(data) {
+      try {
+        const { months, kwh, cost, ev_kwh } = data;
+        if (!months?.length || !kwh?.length || !cost?.length) {
+          showError('Received incomplete data — missing months, kwh, or cost.');
+          return;
+        }
+
+        buildSummary(kwh, cost, ev_kwh);
+        buildChart(months, kwh, cost, ev_kwh);
+
+        document.getElementById('loading').classList.add('hidden');
+        document.getElementById('error').classList.add('hidden');
+        document.getElementById('content').classList.remove('hidden');
+      } catch (err) {
+        showError('Error rendering chart: ' + err.message);
+      }
+    }
+
+    /* ── Summary Cards ──────────────────────────── */
+    function buildSummary(kwh, cost, ev_kwh) {
+      const totalKwh = kwh.reduce((a, b) => a + b, 0);
+      const avgCost = cost.reduce((a, b) => a + b, 0) / cost.length;
+
+      let html = `
+        <div class="summary-card">
+          <div class="label">Total Usage</div>
+          <div class="value primary">${formatNumber(totalKwh)}</div>
+          <div class="unit">kWh</div>
+        </div>
+        <div class="summary-card">
+          <div class="label">Avg Monthly Cost</div>
+          <div class="value secondary">$${avgCost.toFixed(2)}</div>
+          <div class="unit">per month</div>
+        </div>
+      `;
+
+      if (ev_kwh && ev_kwh.length > 0) {
+        const totalEv = ev_kwh.reduce((a, b) => a + b, 0);
+        html += `
+          <div class="summary-card">
+            <div class="label">EV Charging</div>
+            <div class="value accent">${formatNumber(totalEv)}</div>
+            <div class="unit">kWh</div>
+          </div>
+        `;
+      }
+
+      document.getElementById('summary').innerHTML = html;
+    }
+
+    /* ── Chart ──────────────────────────────────── */
+    function buildChart(months, kwh, cost, ev_kwh) {
+      if (chart) chart.destroy();
+
+      const hasEv = ev_kwh && ev_kwh.length > 0 && ev_kwh.some((v) => v > 0);
+
+      // If EV data exists, compute home (non-EV) kWh for stacking
+      const homeKwh = hasEv ? kwh.map((v, i) => Math.max(0, v - (ev_kwh[i] || 0))) : kwh;
+
+      const datasets = [];
+
+      if (hasEv) {
+        // Stacked: Home + EV
+        datasets.push({
+          label: 'Home kWh',
+          type: 'bar',
+          data: homeKwh,
+          backgroundColor: 'rgba(0, 166, 214, 0.65)',
+          borderColor: 'rgba(0, 166, 214, 1)',
+          borderWidth: 1,
+          borderRadius: 4,
+          yAxisID: 'yKwh',
+          stack: 'usage',
+          order: 2,
+        });
+        datasets.push({
+          label: 'EV kWh',
+          type: 'bar',
+          data: ev_kwh,
+          backgroundColor: 'rgba(247, 148, 29, 0.65)',
+          borderColor: 'rgba(247, 148, 29, 1)',
+          borderWidth: 1,
+          borderRadius: 4,
+          yAxisID: 'yKwh',
+          stack: 'usage',
+          order: 3,
+        });
+      } else {
+        datasets.push({
+          label: 'Usage (kWh)',
+          type: 'bar',
+          data: kwh,
+          backgroundColor: 'rgba(0, 166, 214, 0.65)',
+          borderColor: 'rgba(0, 166, 214, 1)',
+          borderWidth: 1,
+          borderRadius: 4,
+          yAxisID: 'yKwh',
+          order: 2,
+        });
+      }
+
+      // Cost line
+      datasets.push({
+        label: 'Cost ($)',
+        type: 'line',
+        data: cost,
+        borderColor: '#005b96',
+        backgroundColor: 'rgba(0, 91, 150, 0.1)',
+        borderWidth: 2.5,
+        pointRadius: 4,
+        pointBackgroundColor: '#005b96',
+        pointBorderColor: '#fff',
+        pointBorderWidth: 2,
+        pointHoverRadius: 6,
+        tension: 0.35,
+        fill: true,
+        yAxisID: 'yCost',
+        order: 1,
+      });
+
+      const ctx = document.getElementById('usageChart').getContext('2d');
+
+      chart = new Chart(ctx, {
+        type: 'bar',
+        data: { labels: months, datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: {
+            mode: 'index',
+            intersect: false,
+          },
+          plugins: {
+            legend: {
+              display: true,
+              position: 'bottom',
+              labels: {
+                usePointStyle: true,
+                pointStyle: 'rectRounded',
+                padding: 16,
+                font: { family: 'system-ui', size: 12 },
+                color: '#4b5563',
+              },
+            },
+            tooltip: {
+              backgroundColor: 'rgba(26, 26, 46, 0.92)',
+              titleFont: { family: 'system-ui', size: 13, weight: '600' },
+              bodyFont: { family: 'system-ui', size: 12 },
+              padding: 12,
+              cornerRadius: 8,
+              callbacks: {
+                label: function (ctx) {
+                  const label = ctx.dataset.label || '';
+                  const val = ctx.parsed.y;
+                  if (label.includes('$')) return `${label}: $${val.toFixed(2)}`;
+                  return `${label}: ${formatNumber(val)} kWh`;
+                },
+              },
+            },
+          },
+          scales: {
+            x: {
+              grid: { display: false },
+              ticks: {
+                font: { family: 'system-ui', size: 11 },
+                color: '#9ca3af',
+                maxRotation: 45,
+                minRotation: 0,
+              },
+            },
+            yKwh: {
+              type: 'linear',
+              position: 'left',
+              stacked: hasEv,
+              title: {
+                display: true,
+                text: 'kWh',
+                font: { family: 'system-ui', size: 12, weight: '600' },
+                color: '#00a6d6',
+              },
+              grid: { color: 'rgba(0, 0, 0, 0.04)' },
+              ticks: {
+                font: { family: 'system-ui', size: 11 },
+                color: '#9ca3af',
+                callback: (v) => formatNumber(v),
+              },
+              beginAtZero: true,
+            },
+            yCost: {
+              type: 'linear',
+              position: 'right',
+              title: {
+                display: true,
+                text: 'Cost ($)',
+                font: { family: 'system-ui', size: 12, weight: '600' },
+                color: '#005b96',
+              },
+              grid: { drawOnChartArea: false },
+              ticks: {
+                font: { family: 'system-ui', size: 11 },
+                color: '#9ca3af',
+                callback: (v) => '$' + v,
+              },
+              beginAtZero: true,
+            },
+          },
+        },
+      });
+    }
+
+    /* ── Helpers ─────────────────────────────────── */
+    function formatNumber(n) {
+      return Number(n).toLocaleString('en-US');
+    }
+
+    function showError(msg) {
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('content').classList.add('hidden');
+      const el = document.getElementById('error');
+      el.textContent = msg;
+      el.classList.remove('hidden');
+    }
+
+    /* ================================================================
+     *  Boot
+     * ================================================================ */
+    document.addEventListener('DOMContentLoaded', () => {
+      // Try the OpenAI fallback first
+      if (checkToolOutputFallback()) return;
+
+      // Initialise the MCP Apps bridge
+      initBridge();
+
+      // If no data arrives in 15s, show an error
+      setTimeout(() => {
+        if (document.getElementById('loading').classList.contains('hidden')) return;
+        // One last fallback check
+        if (!checkToolOutputFallback()) {
+          showError('Timed out waiting for usage data. Please try again.');
+        }
+      }, 15000);
+    });
+  </script>
+</body>
+</html>

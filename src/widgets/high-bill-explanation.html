@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>High Bill Explanation</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+  *, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #f5f6fa;
+    color: #2c3e50;
+    line-height: 1.5;
+    padding: 16px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .widget-container {
+    max-width: 640px;
+    margin: 0 auto;
+  }
+
+  /* ── Loading State ── */
+  .loading-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 64px 24px;
+    gap: 16px;
+  }
+
+  .loading-spinner {
+    width: 40px;
+    height: 40px;
+    border: 4px solid #e0e0e0;
+    border-top-color: #3498db;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .loading-text {
+    font-size: 14px;
+    color: #7f8c8d;
+  }
+
+  .loading-skeleton {
+    width: 100%;
+    max-width: 400px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 8px;
+  }
+
+  .skeleton-bar {
+    height: 14px;
+    background: linear-gradient(90deg, #eee 25%, #ddd 50%, #eee 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s ease-in-out infinite;
+    border-radius: 4px;
+  }
+
+  .skeleton-bar:nth-child(1) { width: 100%; }
+  .skeleton-bar:nth-child(2) { width: 85%; }
+  .skeleton-bar:nth-child(3) { width: 60%; }
+
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* ── Main Content (hidden until data loads) ── */
+  .content { display: none; }
+  .content.visible { display: block; }
+
+  /* ── Card ── */
+  .card {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+
+  .card-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #34495e;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .card-title .icon {
+    font-size: 18px;
+  }
+
+  /* ── Alert Header ── */
+  .alert-header {
+    background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+    color: #fff;
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-bottom: 16px;
+    box-shadow: 0 4px 12px rgba(231,76,60,0.3);
+  }
+
+  .alert-header .label {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    opacity: 0.85;
+    margin-bottom: 4px;
+  }
+
+  .alert-header .amount {
+    font-size: 28px;
+    font-weight: 800;
+    line-height: 1.2;
+  }
+
+  .alert-header .amount .pct {
+    font-size: 18px;
+    font-weight: 600;
+    opacity: 0.9;
+  }
+
+  .alert-header .sub {
+    font-size: 13px;
+    opacity: 0.8;
+    margin-top: 4px;
+  }
+
+  .bill-amounts {
+    display: flex;
+    gap: 24px;
+    margin-top: 12px;
+  }
+
+  .bill-amount-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .bill-amount-item .ba-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    opacity: 0.7;
+  }
+
+  .bill-amount-item .ba-value {
+    font-size: 20px;
+    font-weight: 700;
+  }
+
+  .bill-amount-item .ba-kwh {
+    font-size: 11px;
+    opacity: 0.7;
+  }
+
+  /* ── Chart ── */
+  .chart-wrapper {
+    position: relative;
+    width: 100%;
+    height: 220px;
+  }
+
+  /* ── Comparison Table ── */
+  .comparison-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  .comparison-table thead th {
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #95a5a6;
+    padding: 0 8px 10px;
+    border-bottom: 2px solid #ecf0f1;
+  }
+
+  .comparison-table thead th:not(:first-child) {
+    text-align: right;
+  }
+
+  .comparison-table tbody td {
+    padding: 10px 8px;
+    border-bottom: 1px solid #f0f0f0;
+  }
+
+  .comparison-table tbody td:not(:first-child) {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .comparison-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  .comparison-table .charge-name {
+    font-weight: 500;
+    color: #2c3e50;
+  }
+
+  .comparison-table .prev-amount {
+    color: #7f8c8d;
+  }
+
+  .comparison-table .curr-amount {
+    font-weight: 600;
+    color: #2c3e50;
+  }
+
+  .delta {
+    font-weight: 600;
+    font-size: 12px;
+    border-radius: 4px;
+    padding: 2px 6px;
+    display: inline-block;
+    min-width: 48px;
+    text-align: right;
+  }
+
+  .delta.increase {
+    color: #e74c3c;
+    background: rgba(231,76,60,0.08);
+  }
+
+  .delta.decrease {
+    color: #27ae60;
+    background: rgba(39,174,96,0.08);
+  }
+
+  .delta.neutral {
+    color: #95a5a6;
+    background: rgba(149,165,166,0.08);
+  }
+
+  .table-total-row td {
+    border-top: 2px solid #ecf0f1 !important;
+    font-weight: 700 !important;
+    padding-top: 12px !important;
+  }
+
+  /* ── Contributing Factors ── */
+  .factors-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .factor-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px;
+    background: #fdf2f2;
+    border-radius: 10px;
+    border-left: 4px solid #e74c3c;
+  }
+
+  .factor-icon {
+    font-size: 22px;
+    flex-shrink: 0;
+    width: 32px;
+    text-align: center;
+    line-height: 1.4;
+  }
+
+  .factor-body {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .factor-name {
+    font-size: 14px;
+    font-weight: 700;
+    color: #2c3e50;
+  }
+
+  .factor-detail {
+    font-size: 12px;
+    color: #7f8c8d;
+    margin-top: 2px;
+  }
+
+  .factor-impact {
+    font-size: 15px;
+    font-weight: 800;
+    color: #e74c3c;
+    flex-shrink: 0;
+    align-self: center;
+    white-space: nowrap;
+  }
+
+  /* ── Savings Tip ── */
+  .savings-banner {
+    background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
+    color: #fff;
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    box-shadow: 0 4px 12px rgba(39,174,96,0.25);
+  }
+
+  .savings-icon {
+    font-size: 24px;
+    flex-shrink: 0;
+  }
+
+  .savings-body .savings-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    opacity: 0.85;
+  }
+
+  .savings-body .savings-text {
+    font-size: 14px;
+    margin-top: 4px;
+    line-height: 1.45;
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 480px) {
+    body { padding: 10px; }
+    .card { padding: 14px; }
+    .alert-header { padding: 16px 18px; }
+    .alert-header .amount { font-size: 22px; }
+    .alert-header .amount .pct { font-size: 15px; }
+    .bill-amounts { gap: 16px; }
+    .bill-amount-item .ba-value { font-size: 17px; }
+    .chart-wrapper { height: 180px; }
+    .comparison-table { font-size: 12px; }
+    .factor-card { padding: 10px; gap: 8px; }
+    .factor-impact { font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Loading State -->
+<div class="widget-container" id="loadingState">
+  <div class="loading-state">
+    <div class="loading-spinner"></div>
+    <div class="loading-text">Loading your bill analysis...</div>
+    <div class="loading-skeleton">
+      <div class="skeleton-bar"></div>
+      <div class="skeleton-bar"></div>
+      <div class="skeleton-bar"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Main Content -->
+<div class="widget-container content" id="mainContent">
+
+  <!-- Alert Header -->
+  <div class="alert-header" id="alertHeader"></div>
+
+  <!-- Section 1: Monthly Comparison Chart -->
+  <div class="card">
+    <div class="card-title"><span class="icon">📊</span> 6-Month Bill History</div>
+    <div class="chart-wrapper">
+      <canvas id="billChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Section 2: Charge Breakdown Table -->
+  <div class="card">
+    <div class="card-title"><span class="icon">📋</span> Charge-by-Charge Comparison</div>
+    <table class="comparison-table" id="chargeTable">
+      <thead>
+        <tr>
+          <th>Charge</th>
+          <th>Previous</th>
+          <th>Current</th>
+          <th>Change</th>
+        </tr>
+      </thead>
+      <tbody id="chargeTableBody"></tbody>
+    </table>
+  </div>
+
+  <!-- Section 3: Contributing Factors -->
+  <div class="card">
+    <div class="card-title"><span class="icon">🔍</span> Why Your Bill Increased</div>
+    <div class="factors-list" id="factorsList"></div>
+  </div>
+
+  <!-- Section 4: Savings Tip -->
+  <div id="savingsBanner"></div>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ================================================================
+   *  MCP Apps Bridge — JSON-RPC over postMessage
+   * ================================================================ */
+  const PROTOCOL_VERSION = '2026-01-26';
+  let rpcId = 0;
+  let pendingRpc = {};
+  let billChart = null;
+
+  function nextId() { return ++rpcId; }
+
+  /** Send a JSON-RPC request to the parent frame */
+  function rpcRequest(method, params) {
+    return new Promise(function (resolve, reject) {
+      const id = nextId();
+      pendingRpc[id] = { resolve: resolve, reject: reject };
+      var msg = { jsonrpc: '2.0', id: id, method: method, params: params || {} };
+      window.parent.postMessage(msg, '*');
+      // Timeout after 10s
+      setTimeout(function () {
+        if (pendingRpc[id]) {
+          delete pendingRpc[id];
+          reject(new Error('RPC timeout: ' + method));
+        }
+      }, 10000);
+    });
+  }
+
+  /** Send a JSON-RPC notification (no id, no response expected) */
+  function rpcNotify(method, params) {
+    var msg = { jsonrpc: '2.0', method: method, params: params || {} };
+    window.parent.postMessage(msg, '*');
+  }
+
+  /** Listen for messages from parent */
+  window.addEventListener('message', function (event) {
+    var data = event.data;
+    if (!data || typeof data !== 'object') return;
+
+    // Response to our request
+    if (data.jsonrpc === '2.0' && data.id && pendingRpc[data.id]) {
+      var handler = pendingRpc[data.id];
+      delete pendingRpc[data.id];
+      if (data.error) {
+        handler.reject(data.error);
+      } else {
+        handler.resolve(data.result);
+      }
+      return;
+    }
+
+    // Notification from parent (tool result)
+    if (data.jsonrpc === '2.0' && !data.id && data.method === 'ui/notifications/tool-result') {
+      var sc = data.params && data.params.structuredContent;
+      if (sc) {
+        renderWidget(sc);
+      }
+      return;
+    }
+  });
+
+  /** Initialize the MCP Apps bridge */
+  async function initBridge() {
+    try {
+      // Step 1: send ui/initialize
+      await rpcRequest('ui/initialize', {
+        appInfo: {
+          name: 'high-bill-explanation',
+          version: '1.0.0',
+          description: 'Explains why a customer\'s FPL electric bill is high'
+        },
+        appCapabilities: {
+          renderContent: true,
+          charts: true
+        },
+        protocolVersion: PROTOCOL_VERSION
+      });
+
+      // Step 2: send initialized notification
+      rpcNotify('ui/notifications/initialized');
+    } catch (e) {
+      console.warn('[HighBillWidget] Bridge init failed, falling back:', e);
+    }
+
+    // Fallback: check window.openai.toolOutput
+    setTimeout(checkFallback, 500);
+  }
+
+  function checkFallback() {
+    if (document.getElementById('mainContent').classList.contains('visible')) return;
+    if (window.openai && window.openai.toolOutput) {
+      try {
+        var data = typeof window.openai.toolOutput === 'string'
+          ? JSON.parse(window.openai.toolOutput)
+          : window.openai.toolOutput;
+        if (data.structuredContent) {
+          renderWidget(data.structuredContent);
+        } else {
+          renderWidget(data);
+        }
+      } catch (e) {
+        console.error('[HighBillWidget] Fallback parse error:', e);
+      }
+    }
+  }
+
+  /* ================================================================
+   *  Rendering
+   * ================================================================ */
+
+  function fmt(n) {
+    return '$' + Number(n).toFixed(2);
+  }
+
+  function fmtKwh(n) {
+    return Number(n).toLocaleString() + ' kWh';
+  }
+
+  /** Factor → emoji mapping */
+  var factorIcons = {
+    'higher usage':    '⚡',
+    'summer rates':    '☀️',
+    'winter rates':    '❄️',
+    'billing days':    '📅',
+    'rate increase':   '📈',
+    'fuel':            '⛽',
+    'demand':          '🔌',
+    'storm':           '🌪️',
+    'default':         '💡'
+  };
+
+  function getFactorIcon(factorName) {
+    var lower = (factorName || '').toLowerCase();
+    for (var key in factorIcons) {
+      if (key !== 'default' && lower.indexOf(key) !== -1) return factorIcons[key];
+    }
+    return factorIcons['default'];
+  }
+
+  function renderWidget(d) {
+    // Guard against double-render
+    if (document.getElementById('mainContent').classList.contains('visible')) return;
+
+    // ── Alert Header ──
+    var increase = (d.current_bill - d.previous_bill).toFixed(2);
+    document.getElementById('alertHeader').innerHTML =
+      '<div class="label">Bill Alert — ' + d.current_month + '</div>' +
+      '<div class="amount">' +
+        'Your bill increased ' + fmt(increase) +
+        ' <span class="pct">(' + d.bill_increase_pct + '%)</span>' +
+      '</div>' +
+      '<div class="sub">' + fmtKwh(d.current_kwh) + ' used — up ' + d.kwh_increase_pct + '% from last month</div>' +
+      '<div class="bill-amounts">' +
+        '<div class="bill-amount-item">' +
+          '<span class="ba-label">Previous</span>' +
+          '<span class="ba-value">' + fmt(d.previous_bill) + '</span>' +
+          '<span class="ba-kwh">' + fmtKwh(d.previous_kwh) + '</span>' +
+        '</div>' +
+        '<div class="bill-amount-item">' +
+          '<span class="ba-label">Current</span>' +
+          '<span class="ba-value">' + fmt(d.current_bill) + '</span>' +
+          '<span class="ba-kwh">' + fmtKwh(d.current_kwh) + '</span>' +
+        '</div>' +
+      '</div>';
+
+    // ── Bar Chart ──
+    renderChart(d.monthly_comparison);
+
+    // ── Charge Breakdown Table ──
+    renderChargeTable(d.charge_breakdown, d.previous_bill, d.current_bill);
+
+    // ── Contributing Factors ──
+    renderFactors(d.contributing_factors);
+
+    // ── Savings Tip ──
+    if (d.savings_tip) {
+      document.getElementById('savingsBanner').innerHTML =
+        '<div class="savings-banner">' +
+          '<div class="savings-icon">💡</div>' +
+          '<div class="savings-body">' +
+            '<div class="savings-label">Savings Tip</div>' +
+            '<div class="savings-text">' + escapeHtml(d.savings_tip) + '</div>' +
+          '</div>' +
+        '</div>';
+    }
+
+    // Show content, hide loading
+    document.getElementById('loadingState').style.display = 'none';
+    document.getElementById('mainContent').classList.add('visible');
+  }
+
+  function renderChart(monthlyData) {
+    if (!monthlyData || !monthlyData.length) return;
+
+    var labels = monthlyData.map(function (m) { return m.month.replace(/\s+20/, " '"); });
+    var bills = monthlyData.map(function (m) { return m.bill; });
+    var kwhs = monthlyData.map(function (m) { return m.kwh; });
+
+    // Color the last bar differently (current month highlight)
+    var barColors = bills.map(function (_, i) {
+      return i === bills.length - 1 ? '#e74c3c' : '#3498db';
+    });
+    var barBorders = bills.map(function (_, i) {
+      return i === bills.length - 1 ? '#c0392b' : '#2980b9';
+    });
+
+    var ctx = document.getElementById('billChart').getContext('2d');
+    billChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: 'Bill Amount ($)',
+            data: bills,
+            backgroundColor: barColors,
+            borderColor: barBorders,
+            borderWidth: 1,
+            borderRadius: 6,
+            yAxisID: 'y'
+          },
+          {
+            label: 'Usage (kWh)',
+            data: kwhs,
+            type: 'line',
+            borderColor: '#f39c12',
+            backgroundColor: 'rgba(243,156,18,0.1)',
+            pointBackgroundColor: '#f39c12',
+            pointBorderColor: '#fff',
+            pointBorderWidth: 2,
+            pointRadius: 4,
+            tension: 0.3,
+            fill: true,
+            yAxisID: 'y1'
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: {
+          intersect: false,
+          mode: 'index'
+        },
+        plugins: {
+          legend: {
+            position: 'bottom',
+            labels: {
+              font: { family: 'system-ui', size: 11 },
+              usePointStyle: true,
+              pointStyleWidth: 12,
+              padding: 16
+            }
+          },
+          tooltip: {
+            backgroundColor: 'rgba(44,62,80,0.95)',
+            titleFont: { family: 'system-ui', size: 12 },
+            bodyFont: { family: 'system-ui', size: 12 },
+            padding: 10,
+            cornerRadius: 8,
+            callbacks: {
+              label: function (context) {
+                if (context.dataset.yAxisID === 'y1') {
+                  return ' ' + context.parsed.y.toLocaleString() + ' kWh';
+                }
+                return ' $' + context.parsed.y.toFixed(2);
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: {
+              font: { family: 'system-ui', size: 11 },
+              color: '#95a5a6'
+            }
+          },
+          y: {
+            position: 'left',
+            beginAtZero: true,
+            grid: { color: 'rgba(0,0,0,0.04)' },
+            ticks: {
+              font: { family: 'system-ui', size: 11 },
+              color: '#95a5a6',
+              callback: function (v) { return '$' + v; }
+            }
+          },
+          y1: {
+            position: 'right',
+            beginAtZero: true,
+            grid: { drawOnChartArea: false },
+            ticks: {
+              font: { family: 'system-ui', size: 11 },
+              color: '#f39c12',
+              callback: function (v) { return v + ' kWh'; }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  function renderChargeTable(charges, prevTotal, currTotal) {
+    if (!charges || !charges.length) return;
+
+    var tbody = document.getElementById('chargeTableBody');
+    var html = '';
+
+    charges.forEach(function (c) {
+      var delta = c.current - c.previous;
+      var cls = delta > 0.005 ? 'increase' : (delta < -0.005 ? 'decrease' : 'neutral');
+      var sign = delta > 0.005 ? '+' : '';
+      html +=
+        '<tr>' +
+          '<td class="charge-name">' + escapeHtml(c.name) + '</td>' +
+          '<td class="prev-amount">' + fmt(c.previous) + '</td>' +
+          '<td class="curr-amount">' + fmt(c.current) + '</td>' +
+          '<td><span class="delta ' + cls + '">' + sign + fmt(delta).replace('$-', '-$') + '</span></td>' +
+        '</tr>';
+    });
+
+    // Total row
+    var totalDelta = currTotal - prevTotal;
+    var totalCls = totalDelta > 0.005 ? 'increase' : (totalDelta < -0.005 ? 'decrease' : 'neutral');
+    var totalSign = totalDelta > 0.005 ? '+' : '';
+    html +=
+      '<tr class="table-total-row">' +
+        '<td class="charge-name">Total</td>' +
+        '<td class="prev-amount">' + fmt(prevTotal) + '</td>' +
+        '<td class="curr-amount">' + fmt(currTotal) + '</td>' +
+        '<td><span class="delta ' + totalCls + '">' + totalSign + fmt(totalDelta).replace('$-', '-$') + '</span></td>' +
+      '</tr>';
+
+    tbody.innerHTML = html;
+  }
+
+  function renderFactors(factors) {
+    if (!factors || !factors.length) return;
+
+    var container = document.getElementById('factorsList');
+    var html = '';
+
+    factors.forEach(function (f) {
+      var icon = getFactorIcon(f.factor);
+      html +=
+        '<div class="factor-card">' +
+          '<div class="factor-icon">' + icon + '</div>' +
+          '<div class="factor-body">' +
+            '<div class="factor-name">' + escapeHtml(f.factor) + '</div>' +
+            '<div class="factor-detail">' + escapeHtml(f.detail) + '</div>' +
+          '</div>' +
+          '<div class="factor-impact">+' + escapeHtml(f.impact) + '</div>' +
+        '</div>';
+    });
+
+    container.innerHTML = html;
+  }
+
+  function escapeHtml(str) {
+    if (!str) return '';
+    var div = document.createElement('div');
+    div.appendChild(document.createTextNode(String(str)));
+    return div.innerHTML;
+  }
+
+  /* ================================================================
+   *  Boot
+   * ================================================================ */
+  initBridge();
+
+})();
+</script>
+</body>
+</html>

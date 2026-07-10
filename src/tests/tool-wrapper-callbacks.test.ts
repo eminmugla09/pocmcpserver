@@ -40,7 +40,7 @@ describe('Registered Tool Wrapper Callback Coverage', () => {
 
     expect(tools).toBeDefined();
     const toolNames = Object.keys(tools);
-    expect(toolNames.length).toBe(54);
+    expect(toolNames.length).toBe(61);
 
     const vehicleRegistration = parseToolText(
       await tools.register_vehicle.handler({
@@ -133,15 +133,25 @@ describe('Registered Tool Wrapper Callback Coverage', () => {
       upsert_outage_status: { outage_event_id: 'OUTAGE-WRAPPER-001', premise_number: '60412233', status: 'restored', cause: 'weather', estimated_restoration_at: '2026-06-30T06:00:00Z', affected_customers: 100 },
       get_proactive_notifications: { customer_number: '1009988776', account_number: '5210099001', limit: 10 },
       report_outage: { account_number: '5210099001', description: 'Coverage test outage report' },
-      get_outage_status: { account_number: '5210099001' }
+      get_outage_status: { account_number: '5210099001' },
+      render_usage_chart: { months: ['Jan 2026', 'Feb 2026'], kwh: [1200, 1100], cost: [145.50, 132.20] },
+      render_billing_dashboard: { current_bill: { total: 185.50, due_date: '2026-08-01', billing_period: 'Jun 1 - Jun 30, 2026', kwh_used: 1450, charges: [{ name: 'Base Charge', amount: 8.58 }] }, payments: [{ date: '2026-06-15', amount: 172.30, method: 'AutoPay - Bank' }] },
+      render_high_bill_explanation: { current_month: 'Jun 2026', current_bill: 245.80, previous_bill: 185.50, bill_increase_pct: 32.5, current_kwh: 1890, previous_kwh: 1450, kwh_increase_pct: 30.3, monthly_comparison: [{ month: 'Jun 2026', bill: 245.80, kwh: 1890 }], charge_breakdown: [{ name: 'Base Charge', current: 8.58, previous: 8.58 }], contributing_factors: [{ factor: 'Higher Usage', detail: 'Up 440 kWh', impact: '$29.04' }] },
+      render_rate_comparison: { current_plan: 'RS-1 Residential', current_monthly_avg: 185.50, comparisons: [{ plan_name: 'TOU-EV Off-Peak', estimated_monthly: 167.40, monthly_savings: 18.10, annual_savings: 217.20, best_for: 'EV owners' }] },
+      render_outage_status: { status: 'ACTIVE' },
+      render_ev_charging_chart: { vehicle: 'Tesla Model 3' },
+      render_account_overview: { customer_name: 'Maria Rodriguez', account_number: '6814700001', account_status: 'Active', account_standing: 'Good' }
     };
 
     for (const toolName of toolNames) {
       const tool = tools[toolName];
       const input = inputs[toolName] ?? {};
       const wrapperResult = await tool.handler(input);
-      const parsedPayload = parseToolText(wrapperResult);
-      expect(parsedPayload).toBeDefined();
+      expect(wrapperResult).toBeDefined();
+      expect(wrapperResult.content).toBeDefined();
+      expect(Array.isArray(wrapperResult.content)).toBe(true);
+      expect(wrapperResult.content.length).toBeGreaterThan(0);
+      expect(wrapperResult.content[0].type).toBe('text');
     }
   });
 });
