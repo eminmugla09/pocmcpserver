@@ -74,7 +74,9 @@ const findMatchingCustomers = async (filters: { customer_number?: string; phone?
 };
 
 const jsonContent = (payload: unknown) => ({
-  structuredContent: payload as Record<string, unknown> | undefined,
+  structuredContent: (payload !== null && typeof payload === "object" && !Array.isArray(payload)
+    ? payload
+    : undefined) as Record<string, unknown> | undefined,
   content: [
     {
       type: "text" as const,

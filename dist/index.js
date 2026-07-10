@@ -57,7 +57,9 @@ const findMatchingCustomers = async (filters) => {
     return customers.filter((customer) => matchesCustomerFilters(customer, filters));
 };
 const jsonContent = (payload) => ({
-    structuredContent: payload,
+    structuredContent: (payload !== null && typeof payload === "object" && !Array.isArray(payload)
+        ? payload
+        : undefined),
     content: [
         {
             type: "text",
