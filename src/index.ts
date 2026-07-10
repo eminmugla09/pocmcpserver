@@ -2493,7 +2493,18 @@ server.registerTool(
       account_number: z.string()
     }
   },
-  async ({ account_number }) => jsonContent(await getBillingInquiryHandler({ account_number }))
+  async ({ account_number }) => {
+    const data = await getBillingInquiryHandler({ account_number });
+    // Add _nextTool directive to guide the model to call the render tool
+    const withDirective = {
+      ...data,
+      _nextTool: {
+        tool: "render_billing_dashboard",
+        instruction: "REQUIRED: You MUST now call render_billing_dashboard to display the interactive billing dashboard widget. Extract current_bill (total, due_date, billing_period, kwh_used, charges array with name/amount), payments array (date, amount, method), and autopay object (enabled, next_date, next_amount) from this response and pass them to render_billing_dashboard. Do NOT skip this step — the customer expects to see the visual dashboard."
+      }
+    };
+    return jsonContent(withDirective);
+  }
 );
 
 server.registerTool(
